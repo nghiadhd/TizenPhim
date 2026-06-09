@@ -4,7 +4,7 @@
 if (new URLSearchParams(location.search).get('sim') === 'tizen') window.tizen = window.tizen || {};
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const VERSION = '1.0.4';
+const VERSION = '1.0.5';
 const API     = 'https://phimapi.com';
 const CDN     = 'https://phimimg.com';
 
@@ -652,24 +652,11 @@ function startPlayback(url) {
   const video = document.getElementById('video');
   if (!video) return;
 
-  if (state.hls) { state.hls.destroy(); state.hls = null; }
   video.ontimeupdate = updatePlayerBar;
   video.onended      = playNext;
-
-  if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-    const hls = new Hls({ enableWorker: false, startFragPrefetch: true });
-    state.hls = hls;
-    hls.loadSource(url);
-    hls.attachMedia(video);
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      video.play().catch(() => {});
-      showOverlay();
-    });
-  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = url;
-    video.play().catch(() => {});
-    showOverlay();
-  }
+  video.src = url;
+  video.play().catch(() => {});
+  showOverlay();
 }
 
 function stopPlayback() {
