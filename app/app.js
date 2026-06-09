@@ -4,7 +4,7 @@
 if (new URLSearchParams(location.search).get('sim') === 'tizen') window.tizen = window.tizen || {};
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const API     = 'https://phimapi.com';
 const CDN     = 'https://phimimg.com';
 
