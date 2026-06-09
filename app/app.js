@@ -551,15 +551,15 @@ function renderDetail() {
   }).join('');
 
   document.getElementById('detail-content').innerHTML = `
-    <div class="detail-back">← Quay lại  •  <span>${escHtml(m.name)}</span></div>
-    <div class="detail-layout">
-      <div class="detail-poster" style="background-image:url('${escHtml(poster)}')"></div>
-      <div class="detail-meta">
-        <div class="detail-title">${escHtml(m.name)}</div>
-        ${m.origin_name ? `<div class="detail-origin">${escHtml(m.origin_name)}</div>` : ''}
-        <div class="detail-tags">${tags}</div>
-        <div class="detail-desc">${escHtml((m.content || '').replace(/<[^>]+>/g, ''))}</div>
-        ${lastEp ? `<div class="series-resume" style="color:var(--accent);font-size:22px;font-weight:600">▶ Tiếp tục: ${escHtml(eps[lastEp.epIdx]?.name || '')}</div>` : ''}
+    <div class="series-back">← Quay lại  •  <span>${escHtml(m.name)}</span></div>
+    <div class="series-layout">
+      <div class="series-poster" style="background-image:url('${escHtml(poster)}')"></div>
+      <div class="series-meta">
+        <div class="series-title">${escHtml(m.name)}</div>
+        ${m.origin_name ? `<div class="series-origin">${escHtml(m.origin_name)}</div>` : ''}
+        <div class="series-tags">${tags}</div>
+        <div class="series-desc">${escHtml((m.content || '').replace(/<[^>]+>/g, ''))}</div>
+        ${lastEp ? `<div class="series-resume">▶ Tiếp tục: ${escHtml(eps[lastEp.epIdx]?.name || '')}</div>` : ''}
         ${servers.length > 1 ? `<div class="server-tabs">${serverTabsHtml}</div>` : ''}
         <div class="ep-section-title">Danh sách tập (${eps.length})</div>
         <div class="episodes-grid" id="episodes-grid">${epGrid}</div>
