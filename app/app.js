@@ -116,7 +116,7 @@ const state = {
 
 // ── Viewport scaling ──────────────────────────────────────────────────────────
 function scaleToViewport() {
-  const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080, 1);
+  const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
   document.body.style.transform = `translate(-50%, -50%) scale(${scale})`;
 }
 
