@@ -3,22 +3,26 @@
 // Dev: ?sim=tizen forces Tizen code path in desktop browser
 if (new URLSearchParams(location.search).get('sim') === 'tizen') window.tizen = window.tizen || {};
 
-// Global error overlay — shows uncaught exceptions on screen instead of silent black
-window.addEventListener('error', function(ev) {
-  var msg = (ev.error ? ev.error.message : ev.message) || String(ev.message);
-  var line = ev.lineno || '?';
+// Global error overlay — shows any uncaught error/rejection instead of silent black
+function _showError(msg, extra) {
   try {
-    document.body.style.transform = 'translate(-50%,-50%)';
-    document.body.innerHTML = '<div style="padding:80px;font-size:32px;color:#fff;background:#111;width:1920px;height:1080px;box-sizing:border-box">' +
+    document.body.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:1920px;height:1080px;overflow:hidden;background:#111;color:#fff;font-family:Arial,sans-serif;font-size:32px;box-sizing:border-box;padding:80px';
+    document.body.innerHTML =
       '<div style="color:#e50914;font-size:48px;font-weight:700;margin-bottom:40px">TizenPhim Error</div>' +
-      '<div style="word-break:break-all">' + String(msg).replace(/</g,'&lt;') + '</div>' +
-      '<div style="margin-top:24px;color:#888">Line ' + line + ' &nbsp;|&nbsp; v' + (typeof VERSION !== 'undefined' ? VERSION : '?') + '</div>' +
-    '</div>';
+      '<div style="word-break:break-all;margin-bottom:24px">' + String(msg).replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</div>' +
+      '<div style="color:#888;font-size:26px">' + String(extra || '').replace(/</g,'&lt;') + ' | v' + (typeof VERSION !== 'undefined' ? VERSION : '?') + '</div>';
   } catch(_) {}
+}
+window.addEventListener('error', function(ev) {
+  _showError((ev.error ? ev.error.message : ev.message) || String(ev.message), 'line ' + (ev.lineno || '?'));
+});
+window.addEventListener('unhandledrejection', function(ev) {
+  var r = ev.reason;
+  _showError(r && r.message ? r.message : String(r), 'unhandledrejection');
 });
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const VERSION = '1.0.6';
+const VERSION = '1.0.7';
 const API     = 'https://phimapi.com';
 const CDN     = 'https://phimimg.com';
 
@@ -129,24 +133,31 @@ const state = {
 
 // ── Viewport scaling ──────────────────────────────────────────────────────────
 function scaleToViewport() {
-  const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
-  document.body.style.transform = `translate(-50%, -50%) scale(${scale})`;
+  const w = window.innerWidth  || screen.width  || 1920;
+  const h = window.innerHeight || screen.height || 1080;
+  const scale = Math.min(w / 1920, h / 1080);
+  document.body.style.transform = 'translate(-50%, -50%) scale(' + (scale || 1) + ')';
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  scaleToViewport();
-  window.addEventListener('resize', scaleToViewport);
-  registerTizenKeys();
-  document.addEventListener('keydown', onKey);
-  document.getElementById('search-input').addEventListener('input', e => {
-    const q = e.target.value.trim();
-    state.search.query = q;
-    clearTimeout(state.search._debounce);
-    if (!q) { state.search.items = []; renderSearch(); return; }
-    state.search._debounce = setTimeout(() => doSearch(q), 500);
-  });
-  startApp();
+  try {
+    scaleToViewport();
+    window.addEventListener('resize', scaleToViewport);
+    registerTizenKeys();
+    document.addEventListener('keydown', onKey);
+    const inp = document.getElementById('search-input');
+    if (inp) inp.addEventListener('input', e => {
+      const q = e.target.value.trim();
+      state.search.query = q;
+      clearTimeout(state.search._debounce);
+      if (!q) { state.search.items = []; renderSearch(); return; }
+      state.search._debounce = setTimeout(() => doSearch(q), 500);
+    });
+    startApp().catch(function(e) { _showError(e && e.message ? e.message : String(e), 'startApp'); });
+  } catch(e) {
+    _showError(e && e.message ? e.message : String(e), 'DOMContentLoaded');
+  }
 });
 
 async function startApp() {
