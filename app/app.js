@@ -116,7 +116,7 @@ const state = {
 
 // ── Viewport scaling ──────────────────────────────────────────────────────────
 function scaleToViewport() {
-  const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+  const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080, 1);
   document.body.style.transform = `translate(-50%, -50%) scale(${scale})`;
 }
 
@@ -317,8 +317,11 @@ function handleSidebarKey(k) {
     clearTimeout(_sidebarDebounce);
     const cat = CATALOGS[state.sidebarFocus];
     if (cat.id === 'search') { showSearch(); return true; }
-    if (cat.id !== state.grid.catId) loadHomeGrid(cat);
-    if (k === KEY.RIGHT) { state.homeZone = 'grid'; state.grid.focus = 0; renderHome(); }
+    const needsLoad = cat.id !== state.grid.catId;
+    if (needsLoad) loadHomeGrid(cat);
+    state.homeZone = 'grid';
+    state.grid.focus = 0;
+    if (!needsLoad) renderHome();
     return true;
   } else { return false; }
   return true;
@@ -728,14 +731,14 @@ function handlePlayer(k) {
 
 // ── Watch history ─────────────────────────────────────────────────────────────
 function getHistory() {
-  try { return JSON.parse(localStorage.getItem('watchHistory') || '{}'); } catch { return {}; }
+  try { return JSON.parse(localStorage.getItem('tizenphim_watchHistory') || '{}'); } catch { return {}; }
 }
 
 function saveHistory(slug, epIdx, name, poster) {
   try {
     const h  = getHistory();
     h[slug]  = { ...h[slug], epIdx, name, poster, ts: Date.now() };
-    localStorage.setItem('watchHistory', JSON.stringify(h));
+    localStorage.setItem('tizenphim_watchHistory', JSON.stringify(h));
   } catch (_) {}
 }
 
