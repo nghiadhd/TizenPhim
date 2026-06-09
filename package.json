@@ -12,5 +12,8 @@
     "MediaStop",
     "MediaFastForward",
     "MediaRewind"
-  ]
+  ],
+  "scripts": {
+    "purge": "curl -s 'https://purge.jsdelivr.net/gh/nghiadhd-2702/TizenPhim@main/package.json' 'https://purge.jsdelivr.net/gh/nghiadhd-2702/TizenPhim@main/app/index.html' 'https://purge.jsdelivr.net/gh/nghiadhd-2702/TizenPhim@main/app/style.css' 'https://purge.jsdelivr.net/gh/nghiadhd-2702/TizenPhim@main/app/app.js' | cat"
+  }
 }
