@@ -1,6 +1,6 @@
 {
-  "name": "tizenphim2",
-  "appName": "TizenPhim2",
+  "name": "tizenphim",
+  "appName": "TizenPhim",
   "version": "1.0.3",
   "description": "Xem phim Vietsub trên Samsung TV - Powered by phimapi.com",
   "packageType": "app",
