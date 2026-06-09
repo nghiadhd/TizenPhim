@@ -3,8 +3,22 @@
 // Dev: ?sim=tizen forces Tizen code path in desktop browser
 if (new URLSearchParams(location.search).get('sim') === 'tizen') window.tizen = window.tizen || {};
 
+// Global error overlay — shows uncaught exceptions on screen instead of silent black
+window.addEventListener('error', function(ev) {
+  var msg = (ev.error ? ev.error.message : ev.message) || String(ev.message);
+  var line = ev.lineno || '?';
+  try {
+    document.body.style.transform = 'translate(-50%,-50%)';
+    document.body.innerHTML = '<div style="padding:80px;font-size:32px;color:#fff;background:#111;width:1920px;height:1080px;box-sizing:border-box">' +
+      '<div style="color:#e50914;font-size:48px;font-weight:700;margin-bottom:40px">TizenPhim Error</div>' +
+      '<div style="word-break:break-all">' + String(msg).replace(/</g,'&lt;') + '</div>' +
+      '<div style="margin-top:24px;color:#888">Line ' + line + ' &nbsp;|&nbsp; v' + (typeof VERSION !== 'undefined' ? VERSION : '?') + '</div>' +
+    '</div>';
+  } catch(_) {}
+});
+
 // ── Config ────────────────────────────────────────────────────────────────────
-const VERSION = '1.0.5';
+const VERSION = '1.0.6';
 const API     = 'https://phimapi.com';
 const CDN     = 'https://phimimg.com';
 
@@ -68,12 +82,12 @@ const CATALOGS = [
   { id: 'gia-dinh',   name: 'Gia Đình' },
   { id: 'the-thao',   name: 'Thể Thao' },
   { id: 'am-nhac',    name: 'Âm Nhạc' },
-  { id: 'au-my',      name: '🌎 Âu Mỹ' },
-  { id: 'han-quoc',   name: '🇰🇷 Hàn Quốc' },
-  { id: 'trung-quoc', name: '🇨🇳 Trung Quốc' },
-  { id: 'nhat-ban',   name: '🇯🇵 Nhật Bản' },
-  { id: 'thai-lan',   name: '🇹🇭 Thái Lan' },
-  { id: 'viet-nam',   name: '🇻🇳 Việt Nam' },
+  { id: 'au-my',      name: 'Âu Mỹ' },
+  { id: 'han-quoc',   name: 'Hàn Quốc' },
+  { id: 'trung-quoc', name: 'Trung Quốc' },
+  { id: 'nhat-ban',   name: 'Nhật Bản' },
+  { id: 'thai-lan',   name: 'Thái Lan' },
+  { id: 'viet-nam',   name: 'Việt Nam' },
 ];
 
 const EP_COLS        = 7;
@@ -111,7 +125,6 @@ const state = {
   overlayTimer:    null,
   currentSlug:     null,
   currentEpIdx:    0,
-  hls:             null,
 };
 
 // ── Viewport scaling ──────────────────────────────────────────────────────────
@@ -138,8 +151,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function startApp() {
   showScreen('loading');
-  document.querySelector('.loading-version').textContent = 'v' + VERSION;
-  document.getElementById('sidebar-version').textContent = 'v' + VERSION;
+  const vEl = document.querySelector('.loading-version');
+  if (vEl) vEl.textContent = 'v' + VERSION;
+  const sidebarVer = document.getElementById('sidebar-version');
+  if (sidebarVer) sidebarVer.textContent = 'v' + VERSION;
   showHome();
 }
 
@@ -662,7 +677,6 @@ function startPlayback(url) {
 function stopPlayback() {
   const video = document.getElementById('video');
   if (video) { video.src = ''; video.ontimeupdate = null; video.onended = null; }
-  if (state.hls) { state.hls.destroy(); state.hls = null; }
   clearTimeout(state.overlayTimer);
 }
 
