@@ -22,12 +22,11 @@ window.addEventListener('unhandledrejection', function(ev) {
 });
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const VERSION = '1.0.7';
+const VERSION = '1.0.8';
 const API     = 'https://phimapi.com';
 const CDN     = 'https://phimimg.com';
 
 // ── Catalogs ──────────────────────────────────────────────────────────────────
-// path: API path suffix. Items parsed from .data.items or .items (both handled).
 const CATALOG_PATHS = {
   'phim-moi':             '/danh-sach/phim-moi-cap-nhat',
   'phim-le':              '/v1/api/danh-sach/phim-le',
@@ -112,7 +111,7 @@ const state = {
   prevScreen: 'home',
 
   homeZone:     'sidebar',
-  sidebarFocus: 2,          // start on Phim Mới
+  sidebarFocus: 2,
   grid: {
     catId: null, catName: '',
     items: [], page: 1, hasMore: false, loading: false, focus: 0,
@@ -120,7 +119,7 @@ const state = {
 
   detail:    null,
   serverIdx: 0,
-  focusZone: 'eps',   // 'servers' | 'eps'
+  focusZone: 'eps',
   focusEp:   0,
   focusSrv:  0,
 
@@ -140,19 +139,19 @@ function scaleToViewport() {
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', function() {
   try {
     scaleToViewport();
     window.addEventListener('resize', scaleToViewport);
     registerTizenKeys();
     document.addEventListener('keydown', onKey);
     const inp = document.getElementById('search-input');
-    if (inp) inp.addEventListener('input', e => {
+    if (inp) inp.addEventListener('input', function(e) {
       const q = e.target.value.trim();
       state.search.query = q;
       clearTimeout(state.search._debounce);
       if (!q) { state.search.items = []; renderSearch(); return; }
-      state.search._debounce = setTimeout(() => doSearch(q), 500);
+      state.search._debounce = setTimeout(function() { doSearch(q); }, 500);
     });
     startApp().catch(function(e) { _showError(e && e.message ? e.message : String(e), 'startApp'); });
   } catch(e) {
@@ -172,43 +171,44 @@ async function startApp() {
 function registerTizenKeys() {
   try {
     ['MediaPlayPause','MediaPlay','MediaPause','MediaStop','MediaFastForward','MediaRewind']
-      .forEach(k => tizen.tvinputdevice.registerKey(k));
+      .forEach(function(k) { tizen.tvinputdevice.registerKey(k); });
   } catch (_) {}
 }
 
 // ── API fetch ─────────────────────────────────────────────────────────────────
-async function fetchCatalog(id, page = 1) {
+async function fetchCatalog(id, page) {
+  if (page === undefined) page = 1;
   const path = CATALOG_PATHS[id];
   if (!path) return [];
-  const sep = path.includes('?') ? '&' : '?';
-  const r = await fetch(`${API}${path}${sep}page=${page}`);
+  const sep = path.indexOf('?') >= 0 ? '&' : '?';
+  const r = await fetch(API + path + sep + 'page=' + page);
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const d = await r.json();
-  return d.data?.items || d.items || [];
+  return (d.data && d.data.items) || d.items || [];
 }
 
 async function fetchDetail(slug) {
-  const r = await fetch(`${API}/phim/${slug}`);
+  const r = await fetch(API + '/phim/' + slug);
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
 
 async function fetchSearch(query) {
-  const r = await fetch(`${API}/v1/api/tim-kiem?keyword=${encodeURIComponent(query)}&limit=24`);
+  const r = await fetch(API + '/v1/api/tim-kiem?keyword=' + encodeURIComponent(query) + '&limit=24');
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const d = await r.json();
-  return d.data?.items || [];
+  return (d.data && d.data.items) || [];
 }
 
 function imgUrl(path) {
   if (!path) return '';
-  if (path.startsWith('http')) return path;
+  if (path.indexOf('http') === 0) return path;
   return CDN + '/' + path.replace(/^\//, '');
 }
 
 // ── Screen switcher ───────────────────────────────────────────────────────────
 function showScreen(name) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
   document.getElementById('screen-' + name).classList.add('active');
   state.screen = name;
 }
@@ -240,10 +240,10 @@ function renderHome() {
 
 function renderSidebar() {
   const list = document.getElementById('sidebar-list');
-  list.innerHTML = CATALOGS.map((cat, i) => {
+  list.innerHTML = CATALOGS.map(function(cat, i) {
     const focused = state.homeZone === 'sidebar' && i === state.sidebarFocus;
     const active  = cat.id === state.grid.catId;
-    return `<li class="sidebar-item${focused ? ' focused' : ''}${active ? ' active' : ''}">${escHtml(cat.name)}</li>`;
+    return '<li class="sidebar-item' + (focused ? ' focused' : '') + (active ? ' active' : '') + '">' + escHtml(cat.name) + '</li>';
   }).join('');
   const fi = list.querySelector('.sidebar-item.focused');
   if (fi) fi.scrollIntoView({ block: 'nearest' });
@@ -256,43 +256,43 @@ function renderHomeGrid() {
   const focus      = Math.max(0, state.grid.focus);
 
   document.getElementById('home-cat-name').textContent  = catName || '';
-  document.getElementById('home-page-info').textContent = hasMore || page > 1 ? `Trang ${page}` : '';
+  document.getElementById('home-page-info').textContent = hasMore || page > 1 ? 'Trang ' + page : '';
 
   const el             = document.getElementById('home-grid');
   const loadingOverlay = document.getElementById('home-loading');
 
   if (!state.grid.catId && !loading) {
-    loadingOverlay?.classList.add('hidden');
+    if (loadingOverlay) loadingOverlay.classList.add('hidden');
     el.innerHTML = '<div class="grid-hint">← Chọn thể loại</div>';
     return;
   }
   if (loading && !items.length) {
-    loadingOverlay?.classList.remove('hidden');
+    if (loadingOverlay) loadingOverlay.classList.remove('hidden');
     el.innerHTML = '';
     return;
   }
-  loadingOverlay?.classList.add('hidden');
+  if (loadingOverlay) loadingOverlay.classList.add('hidden');
 
   const inGrid    = state.homeZone === 'grid';
-  const cardsHtml = items.map((m, i) =>
-    `<div class="card ${inGrid && i === focus ? 'focused' : ''}">
-      <div class="card-poster" style="background-image:url('${escHtml(imgUrl(m.thumb_url || m.poster_url))}')"></div>
-      <div class="card-title">${escHtml(m.name)}</div>
-    </div>`
-  ).join('');
+  const cardsHtml = items.map(function(m, i) {
+    return '<div class="card ' + (inGrid && i === focus ? 'focused' : '') + '">' +
+      '<div class="card-poster" style="background-image:url(\'' + escHtml(imgUrl(m.thumb_url || m.poster_url)) + '\')"></div>' +
+      '<div class="card-title">' + escHtml(m.name) + '</div>' +
+      '</div>';
+  }).join('');
 
   const loadMoreIdx  = items.length;
   const loadMoreHtml = hasMore
-    ? `<div class="card card-load-more ${inGrid && loadMoreIdx === focus ? 'focused' : ''}">
-        <div class="card-load-more-icon">+</div>
-        <div class="card-title">Tải thêm</div>
-      </div>`
+    ? '<div class="card card-load-more ' + (inGrid && loadMoreIdx === focus ? 'focused' : '') + '">' +
+        '<div class="card-load-more-icon">+</div>' +
+        '<div class="card-title">Tải thêm</div>' +
+      '</div>'
     : '';
 
   el.innerHTML = cardsHtml + loadMoreHtml +
     (loading ? '<div class="grid-loading"><div class="spinner" style="width:48px;height:48px;border-width:5px"></div></div>' : '');
 
-  requestAnimationFrame(() => {
+  requestAnimationFrame(function() {
     const fc = el.querySelector('.card.focused');
     if (fc) fc.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   });
@@ -357,18 +357,18 @@ function _scheduleSidebarLoad() {
   clearTimeout(_sidebarDebounce);
   const cat = CATALOGS[state.sidebarFocus];
   if (!cat || cat.id === 'search') return;
-  _sidebarDebounce = setTimeout(() => {
+  _sidebarDebounce = setTimeout(function() {
     if (cat.id !== state.grid.catId) loadHomeGrid(cat);
   }, 350);
 }
 
 function getGridCols(gridId) {
-  const cards = document.querySelectorAll(`#${gridId} .card`);
+  const cards = document.querySelectorAll('#' + gridId + ' .card');
   if (!cards.length) return HOME_GRID_COLS;
   const firstTop = cards[0].offsetTop;
   let cols = 0;
-  for (const card of cards) {
-    if (card.offsetTop !== firstTop) break;
+  for (let i = 0; i < cards.length; i++) {
+    if (cards[i].offsetTop !== firstTop) break;
     cols++;
   }
   return cols || HOME_GRID_COLS;
@@ -412,7 +412,8 @@ function handleGridKey(k) {
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────
-function showSearch(reset = true) {
+function showSearch(reset) {
+  if (reset === undefined) reset = true;
   if (reset) {
     state.search.query = '';
     state.search.items = [];
@@ -425,7 +426,7 @@ function showSearch(reset = true) {
   state.prevScreen = state.screen;
   showScreen('search');
   renderSearch();
-  setTimeout(() => document.getElementById('search-input')?.focus(), 80);
+  setTimeout(function() { const inp = document.getElementById('search-input'); if (inp) inp.focus(); }, 80);
 }
 
 async function doSearch(query) {
@@ -447,24 +448,26 @@ function renderSearch() {
   const { items, loading, focus, query } = state.search;
   const el = document.getElementById('search-results');
   if (!el) return;
-  document.getElementById('search-input-wrap')?.classList.toggle('focused', focus === -1);
+  const sw = document.getElementById('search-input-wrap');
+  if (sw) sw.classList.toggle('focused', focus === -1);
 
   if (loading && !items.length) {
     el.classList.add('is-spinner');
     el.innerHTML = '<div class="spinner"></div>';
   } else if (!items.length) {
     el.classList.remove('is-spinner');
-    el.innerHTML = `<div class="grid-hint">${query ? 'Không tìm thấy kết quả' : 'Nhập tên phim để tìm kiếm'}</div>`;
+    el.innerHTML = '<div class="grid-hint">' + (query ? 'Không tìm thấy kết quả' : 'Nhập tên phim để tìm kiếm') + '</div>';
   } else {
     el.classList.remove('is-spinner');
-    el.innerHTML = items.map((m, i) =>
-      `<div class="card ${i === focus ? 'focused' : ''}">
-        <div class="card-poster" style="background-image:url('${escHtml(imgUrl(m.thumb_url || m.poster_url))}')"></div>
-        <div class="card-title">${escHtml(m.name)}</div>
-      </div>`
-    ).join('');
-    requestAnimationFrame(() => {
-      el.querySelector('.card.focused')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    el.innerHTML = items.map(function(m, i) {
+      return '<div class="card ' + (i === focus ? 'focused' : '') + '">' +
+        '<div class="card-poster" style="background-image:url(\'' + escHtml(imgUrl(m.thumb_url || m.poster_url)) + '\')"></div>' +
+        '<div class="card-title">' + escHtml(m.name) + '</div>' +
+        '</div>';
+    }).join('');
+    requestAnimationFrame(function() {
+      const fc = el.querySelector('.card.focused');
+      if (fc) fc.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     });
   }
 }
@@ -475,7 +478,8 @@ function handleSearch(k) {
   if (focus === -1) {
     if (k === KEY.DOWN && items.length) {
       state.search.focus = 0;
-      document.getElementById('search-input').blur();
+      const inp = document.getElementById('search-input');
+      if (inp) inp.blur();
       renderSearch();
       return true;
     }
@@ -488,7 +492,13 @@ function handleSearch(k) {
   const row  = Math.floor(focus / SEARCH_COLS);
 
   if (k === KEY.UP) {
-    if (row === 0) { state.search.focus = -1; document.getElementById('search-input').focus(); renderSearch(); return true; }
+    if (row === 0) {
+      state.search.focus = -1;
+      const inp = document.getElementById('search-input');
+      if (inp) inp.focus();
+      renderSearch();
+      return true;
+    }
     state.search.focus = Math.max(0, focus - SEARCH_COLS);
   } else if (k === KEY.DOWN) {
     state.search.focus = Math.min(max, focus + SEARCH_COLS);
@@ -504,7 +514,8 @@ function handleSearch(k) {
     return true;
   } else if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) {
     state.search.focus = -1;
-    document.getElementById('search-input').focus();
+    const inp = document.getElementById('search-input');
+    if (inp) inp.focus();
     renderSearch();
     return true;
   } else { return false; }
@@ -538,12 +549,14 @@ async function showDetail(slug) {
     renderDetail();
   } catch (e) {
     document.getElementById('detail-content').innerHTML =
-      `<div class="error-msg">Không tải được nội dung.<br>${escHtml(e.message)}</div>`;
+      '<div class="error-msg">Không tải được nội dung.<br>' + escHtml(e.message) + '</div>';
   }
 }
 
 function currentEps() {
-  return state.detail?.episodes?.[state.serverIdx]?.server_data || [];
+  if (!state.detail || !state.detail.episodes) return [];
+  const srv = state.detail.episodes[state.serverIdx];
+  return (srv && srv.server_data) || [];
 }
 
 function renderDetail() {
@@ -558,47 +571,55 @@ function renderDetail() {
   const poster = imgUrl(m.poster_url || m.thumb_url);
 
   const tags = [
-    m.quality ? `<span class="tag quality">${escHtml(m.quality)}</span>` : '',
-    m.lang    ? `<span class="tag">${escHtml(m.lang)}</span>` : '',
-    m.year    ? `<span class="tag">${escHtml(String(m.year))}</span>` : '',
-    m.time    ? `<span class="tag">${escHtml(m.time)}</span>` : '',
-    ...(m.category || []).slice(0, 3).map(c => `<span class="tag">${escHtml(c.name)}</span>`),
-  ].filter(Boolean).join('');
+    m.quality ? '<span class="tag quality">' + escHtml(m.quality) + '</span>' : '',
+    m.lang    ? '<span class="tag">' + escHtml(m.lang) + '</span>' : '',
+    m.year    ? '<span class="tag">' + escHtml(String(m.year)) + '</span>' : '',
+    m.time    ? '<span class="tag">' + escHtml(m.time) + '</span>' : '',
+  ].concat((m.category || []).slice(0, 3).map(function(c) {
+    return '<span class="tag">' + escHtml(c.name) + '</span>';
+  })).filter(Boolean).join('');
 
-  const serverTabsHtml = servers.map((s, i) =>
-    `<div class="server-tab ${i === state.serverIdx ? 'active' : ''} ${state.focusZone === 'servers' && i === state.focusSrv ? 'focused' : ''}">${escHtml(s.server_name)}</div>`
-  ).join('');
-
-  const isMovie = eps.length === 1 && eps[0]?.name === 'Full';
-  const epGrid  = eps.map((ep, i) => {
-    const isCurrent = i === state.currentEpIdx;
-    const isFocused = state.focusZone === 'eps' && i === state.focusEp;
-    return `<div class="ep-card ${isCurrent ? 'current-ep' : ''} ${isFocused ? 'focused' : ''}">${escHtml(isMovie ? '▶ Xem ngay' : ep.name)}</div>`;
+  const serverTabsHtml = servers.map(function(s, i) {
+    return '<div class="server-tab' +
+      (i === state.serverIdx ? ' active' : '') +
+      (state.focusZone === 'servers' && i === state.focusSrv ? ' focused' : '') +
+      '">' + escHtml(s.server_name) + '</div>';
   }).join('');
 
-  document.getElementById('detail-content').innerHTML = `
-    <div class="series-back">← Quay lại  •  <span>${escHtml(m.name)}</span></div>
-    <div class="series-layout">
-      <div class="series-poster" style="background-image:url('${escHtml(poster)}')"></div>
-      <div class="series-meta">
-        <div class="series-title">${escHtml(m.name)}</div>
-        ${m.origin_name ? `<div class="series-origin">${escHtml(m.origin_name)}</div>` : ''}
-        <div class="series-tags">${tags}</div>
-        <div class="series-desc">${escHtml((m.content || '').replace(/<[^>]+>/g, ''))}</div>
-        ${lastEp ? `<div class="series-resume">▶ Tiếp tục: ${escHtml(eps[lastEp.epIdx]?.name || '')}</div>` : ''}
-        ${servers.length > 1 ? `<div class="server-tabs">${serverTabsHtml}</div>` : ''}
-        <div class="ep-section-title">Danh sách tập (${eps.length})</div>
-        <div class="episodes-grid" id="episodes-grid">${epGrid}</div>
-      </div>
-    </div>`;
+  const isMovie = eps.length === 1 && eps[0] && eps[0].name === 'Full';
+  const epGrid  = eps.map(function(ep, i) {
+    const isCurrent = i === state.currentEpIdx;
+    const isFocused = state.focusZone === 'eps' && i === state.focusEp;
+    return '<div class="ep-card' + (isCurrent ? ' current-ep' : '') + (isFocused ? ' focused' : '') + '">' +
+      escHtml(isMovie ? '▶ Xem ngay' : ep.name) + '</div>';
+  }).join('');
 
-  requestAnimationFrame(() => {
-    document.querySelector('.ep-card.focused')?.scrollIntoView({ block: 'nearest' });
+  const lastEpName = lastEp && eps[lastEp.epIdx] ? eps[lastEp.epIdx].name : '';
+
+  document.getElementById('detail-content').innerHTML =
+    '<div class="series-back">← Quay lại  •  <span>' + escHtml(m.name) + '</span></div>' +
+    '<div class="series-layout">' +
+      '<div class="series-poster" style="background-image:url(\'' + escHtml(poster) + '\')"></div>' +
+      '<div class="series-meta">' +
+        '<div class="series-title">' + escHtml(m.name) + '</div>' +
+        (m.origin_name ? '<div class="series-origin">' + escHtml(m.origin_name) + '</div>' : '') +
+        '<div class="series-tags">' + tags + '</div>' +
+        '<div class="series-desc">' + escHtml((m.content || '').replace(/<[^>]+>/g, '')) + '</div>' +
+        (lastEp && lastEpName ? '<div class="series-resume">▶ Tiếp tục: ' + escHtml(lastEpName) + '</div>' : '') +
+        (servers.length > 1 ? '<div class="server-tabs">' + serverTabsHtml + '</div>' : '') +
+        '<div class="ep-section-title">Danh sách tập (' + eps.length + ')</div>' +
+        '<div class="episodes-grid" id="episodes-grid">' + epGrid + '</div>' +
+      '</div>' +
+    '</div>';
+
+  requestAnimationFrame(function() {
+    const fc = document.querySelector('.ep-card.focused');
+    if (fc) fc.scrollIntoView({ block: 'nearest' });
   });
 }
 
 function handleDetail(k) {
-  const servers = state.detail?.episodes || [];
+  const servers = (state.detail && state.detail.episodes) || [];
   const eps     = currentEps();
 
   if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) {
@@ -607,7 +628,6 @@ function handleDetail(k) {
     return true;
   }
 
-  // Switch between server tabs and episode grid
   if (state.focusZone === 'servers') {
     const maxSrv = servers.length - 1;
     if (k === KEY.LEFT)  state.focusSrv = Math.max(0, state.focusSrv - 1);
@@ -622,7 +642,6 @@ function handleDetail(k) {
     return true;
   }
 
-  // Episode grid zone
   const max    = eps.length - 1;
   const epCols = getGridCols('episodes-grid') || EP_COLS;
   const col    = state.focusEp % epCols;
@@ -660,13 +679,14 @@ function playEpisode(epIdx) {
 
   state.currentEpIdx = epIdx;
   state.focusEp      = epIdx;
-  saveHistory(state.currentSlug, epIdx, state.detail?.movie?.name, state.detail?.movie?.thumb_url);
+
+  const m = state.detail && state.detail.movie;
+  saveHistory(state.currentSlug, epIdx, m && m.name, m && m.thumb_url);
 
   showScreen('player');
-  const m = state.detail?.movie;
   const isMovie = eps.length === 1;
   document.getElementById('player-title').textContent =
-    (m?.name || '') + (isMovie ? '' : ' — ' + ep.name);
+    ((m && m.name) || '') + (isMovie ? '' : ' — ' + ep.name);
   document.getElementById('seek-fill').style.width  = '0%';
   document.getElementById('player-time').textContent = '0:00 / 0:00';
   showOverlayPersistent();
@@ -681,7 +701,7 @@ function startPlayback(url) {
   video.ontimeupdate = updatePlayerBar;
   video.onended      = playNext;
   video.src = url;
-  video.play().catch(() => {});
+  video.play().catch(function() {});
   showOverlay();
 }
 
@@ -700,9 +720,9 @@ function playNext() {
 function updatePlayerBar() {
   const video = document.getElementById('video');
   if (!video || !video.duration) return;
-  const fmt = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
-  document.getElementById('player-time').textContent = `${fmt(video.currentTime)} / ${fmt(video.duration)}`;
-  document.getElementById('seek-fill').style.width   = `${(video.currentTime / video.duration) * 100}%`;
+  const fmt = function(t) { return Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0'); };
+  document.getElementById('player-time').textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration);
+  document.getElementById('seek-fill').style.width   = ((video.currentTime / video.duration) * 100) + '%';
 }
 
 function showOverlay() {
@@ -710,12 +730,13 @@ function showOverlay() {
   if (!overlay) return;
   overlay.classList.add('visible');
   clearTimeout(state.overlayTimer);
-  state.overlayTimer = setTimeout(() => overlay.classList.remove('visible'), 3500);
+  state.overlayTimer = setTimeout(function() { overlay.classList.remove('visible'); }, 3500);
 }
 
 function showOverlayPersistent() {
   clearTimeout(state.overlayTimer);
-  document.getElementById('player-overlay')?.classList.add('visible');
+  const overlay = document.getElementById('player-overlay');
+  if (overlay) overlay.classList.add('visible');
 }
 
 function handlePlayer(k) {
@@ -731,7 +752,7 @@ function handlePlayer(k) {
   showOverlay();
 
   if (k === KEY.ENTER || k === KEY.PLAY || k === KEY.PAUSE || k === KEY.PLAYPAUSE) {
-    if (video) video.paused ? video.play().catch(() => {}) : video.pause();
+    if (video) video.paused ? video.play().catch(function() {}) : video.pause();
   } else if (k === KEY.RIGHT || k === KEY.FF) {
     if (video) video.currentTime += 10;
   } else if (k === KEY.LEFT || k === KEY.REW) {
@@ -743,13 +764,13 @@ function handlePlayer(k) {
 
 // ── Watch history ─────────────────────────────────────────────────────────────
 function getHistory() {
-  try { return JSON.parse(localStorage.getItem('tizenphim_watchHistory') || '{}'); } catch { return {}; }
+  try { return JSON.parse(localStorage.getItem('tizenphim_watchHistory') || '{}'); } catch (_) { return {}; }
 }
 
 function saveHistory(slug, epIdx, name, poster) {
   try {
     const h  = getHistory();
-    h[slug]  = { ...h[slug], epIdx, name, poster, ts: Date.now() };
+    h[slug]  = { epIdx: epIdx, name: name, poster: poster, ts: Date.now() };
     localStorage.setItem('tizenphim_watchHistory', JSON.stringify(h));
   } catch (_) {}
 }
@@ -757,19 +778,18 @@ function saveHistory(slug, epIdx, name, poster) {
 function buildContinueWatching() {
   const h = getHistory();
   return Object.entries(h)
-    .filter(([, v]) => v.name)
-    .sort((a, b) => b[1].ts - a[1].ts)
+    .filter(function(pair) { return pair[1].name; })
+    .sort(function(a, b) { return b[1].ts - a[1].ts; })
     .slice(0, 20)
-    .map(([slug, v]) => ({
-      slug, name: v.name,
-      thumb_url: v.poster || '',
-      poster_url: v.poster || '',
-    }));
+    .map(function(pair) {
+      const slug = pair[0], v = pair[1];
+      return { slug: slug, name: v.name, thumb_url: v.poster || '', poster_url: v.poster || '' };
+    });
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function escHtml(str) {
-  return String(str ?? '')
+  return String(str != null ? str : '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
