@@ -510,23 +510,11 @@ function _scheduleSidebarLoad() {
   }, 350);
 }
 
-function getGridCols(gridId) {
-  const cards = document.querySelectorAll('#' + gridId + ' .card');
-  if (!cards.length) return HOME_GRID_COLS;
-  const firstTop = cards[0].offsetTop;
-  let cols = 0;
-  for (let i = 0; i < cards.length; i++) {
-    if (cards[i].offsetTop !== firstTop) break;
-    cols++;
-  }
-  return cols || HOME_GRID_COLS;
-}
-
 function handleGridKey(k) {
   const { items, focus, hasMore, loading } = state.grid;
   const totalCount = items.length + (hasMore ? 1 : 0);
   const max        = totalCount - 1;
-  const cols       = getGridCols('home-grid');
+  const cols       = HOME_GRID_COLS;
   const col        = focus % cols;
   const row        = Math.floor(focus / cols);
   const totalRows  = Math.ceil(totalCount / cols);
@@ -646,7 +634,7 @@ function handleSearch(k) {
   }
 
   const max  = items.length - 1;
-  const cols = getGridCols('search-results') || SEARCH_COLS;
+  const cols = SEARCH_COLS;
   const col  = focus % cols;
   const row  = Math.floor(focus / cols);
   let focusOnly = false;
@@ -824,7 +812,7 @@ function handleDetail(k) {
   }
 
   const max        = eps.length - 1;
-  const epCols     = getGridCols('episodes-grid') || EP_COLS;
+  const epCols     = EP_COLS;
   const col        = state.focusEp % epCols;
   const oldFocusEp = state.focusEp;
   let focusOnly    = false;
