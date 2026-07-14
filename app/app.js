@@ -327,6 +327,7 @@ function onKey(e) {
 // ── Home ──────────────────────────────────────────────────────────────────────
 let _sidebarDebounce = null;
 let _lastProgressSave = 0;
+let _hls = null;
 
 function showHome() {
   showScreen('home');
@@ -855,6 +856,8 @@ function startPlayback(url, resumeTime) {
   const video = document.getElementById('video');
   if (!video) return;
 
+  if (_hls) { _hls.destroy(); _hls = null; }
+
   video.ontimeupdate = updatePlayerBar;
   video.onended      = playNext;
   video.onloadedmetadata = function() {
@@ -862,8 +865,22 @@ function startPlayback(url, resumeTime) {
       try { video.currentTime = resumeTime; } catch (_) {}
     }
   };
-  video.src = url;
-  video.play().catch(function() {});
+
+  const nativeHls = video.canPlayType('application/vnd.apple.mpegurl');
+  if (nativeHls) {
+    video.src = url;
+    video.play().catch(function() {});
+  } else if (window.Hls && window.Hls.isSupported()) {
+    _hls = new window.Hls();
+    _hls.loadSource(url);
+    _hls.attachMedia(video);
+    _hls.on(window.Hls.Events.MANIFEST_PARSED, function() {
+      video.play().catch(function() {});
+    });
+  } else {
+    video.src = url;
+    video.play().catch(function() {});
+  }
   showOverlay();
 }
 
@@ -875,6 +892,7 @@ function stopPlayback() {
     }
     video.src = ''; video.ontimeupdate = null; video.onended = null; video.onloadedmetadata = null;
   }
+  if (_hls) { _hls.destroy(); _hls = null; }
   clearTimeout(state.overlayTimer);
 }
 
