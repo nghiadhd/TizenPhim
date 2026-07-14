@@ -6,7 +6,7 @@ if (new URLSearchParams(location.search).get('sim') === 'tizen') window.tizen = 
 // Global error overlay — shows any uncaught error/rejection instead of silent black
 function _showError(msg, extra) {
   try {
-    document.body.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:1920px;height:1080px;overflow:hidden;background:#111;color:#fff;font-family:Arial,sans-serif;font-size:32px;box-sizing:border-box;padding:80px';
+    document.body.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;transform:none;overflow:auto;background:#111;color:#fff;font-family:Arial,sans-serif;font-size:32px;box-sizing:border-box;padding:80px;z-index:2147483647';
     document.body.innerHTML =
       '<div style="color:#e50914;font-size:48px;font-weight:700;margin-bottom:40px">TizenPhim Error</div>' +
       '<div style="word-break:break-all;margin-bottom:24px">' + String(msg).replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</div>' +
@@ -22,7 +22,7 @@ window.addEventListener('unhandledrejection', function(ev) {
 });
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const VERSION = '1.0.8';
+const VERSION = '1.0.0';
 const API     = 'https://phimapi.com';
 const CDN     = 'https://phimimg.com';
 
@@ -62,6 +62,7 @@ const CATALOG_PATHS = {
 const CATALOGS = [
   { id: 'search',     name: 'Tìm Kiếm',     local: true },
   { id: 'continue',   name: 'Đang Xem',     local: true },
+  { id: 'favorite',   name: 'Yêu Thích',    local: true },
   { id: 'phim-moi',   name: 'Phim Mới' },
   { id: 'phim-le',    name: 'Phim Lẻ' },
   { id: 'phim-bo',    name: 'Phim Bộ' },
@@ -93,6 +94,8 @@ const CATALOGS = [
   { id: 'viet-nam',   name: 'Việt Nam' },
 ];
 
+const LOCAL_BUILDERS = { continue: buildContinueWatching, favorite: buildFavorites };
+
 const EP_COLS        = 7;
 const HOME_GRID_COLS = 6;
 const SEARCH_COLS    = 7;
@@ -105,13 +108,21 @@ const KEY = {
   STOP: 413, FF: 417, REW: 412,
 };
 
+const LONG_PRESS_MS  = 700;
+const REMOVABLE_CATS = { continue: true, favorite: true };
+
+let _pressTimer = null;
+let _pressFired = false;
+let _pressTarget = null;
+let _enterHeld = false;
+
 // ── State ─────────────────────────────────────────────────────────────────────
 const state = {
   screen:     'home',
   prevScreen: 'home',
 
   homeZone:     'sidebar',
-  sidebarFocus: 2,
+  sidebarFocus: 3,
   grid: {
     catId: null, catName: '',
     items: [], page: 1, hasMore: false, loading: false, focus: 0,
@@ -128,23 +139,17 @@ const state = {
   overlayTimer:    null,
   currentSlug:     null,
   currentEpIdx:    0,
-};
 
-// ── Viewport scaling ──────────────────────────────────────────────────────────
-function scaleToViewport() {
-  const w = window.innerWidth  || screen.width  || 1920;
-  const h = window.innerHeight || screen.height || 1080;
-  const scale = Math.min(w / 1920, h / 1080);
-  document.body.style.transform = 'translate(-50%, -50%) scale(' + (scale || 1) + ')';
-}
+  confirmDialog:   null,
+};
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
   try {
-    scaleToViewport();
-    window.addEventListener('resize', scaleToViewport);
     registerTizenKeys();
     document.addEventListener('keydown', onKey);
+    document.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', resetEnterPress);
     const inp = document.getElementById('search-input');
     if (inp) inp.addEventListener('input', function(e) {
       const q = e.target.value.trim();
@@ -214,8 +219,105 @@ function showScreen(name) {
 }
 
 // ── Key handler ───────────────────────────────────────────────────────────────
+function startEnterPress() {
+  if (_pressTimer || state.confirmDialog) return;
+  const item = state.grid.items[state.grid.focus];
+  if (!item) return;
+  _pressFired = false;
+  _enterHeld  = true;
+  _pressTarget = { catId: state.grid.catId, slug: item.slug, name: item.name };
+  _pressTimer = setTimeout(function() {
+    _pressTimer = null;
+    _pressFired = true;
+    openConfirmDialog(_pressTarget);
+  }, LONG_PRESS_MS);
+}
+
+function onKeyUp(e) {
+  if (e.keyCode !== KEY.ENTER) return;
+  _enterHeld = false;
+  if (_pressTimer) {
+    clearTimeout(_pressTimer);
+    _pressTimer = null;
+    if (!_pressFired && _pressTarget) {
+      state.prevScreen = 'home';
+      showDetail(_pressTarget.slug);
+    }
+  }
+  _pressFired = false;
+  _pressTarget = null;
+}
+
+function resetEnterPress() {
+  if (_pressTimer) { clearTimeout(_pressTimer); _pressTimer = null; }
+  _pressFired = false;
+  _pressTarget = null;
+  _enterHeld = false;
+}
+
+function openConfirmDialog(target) {
+  state.confirmDialog = { catId: target.catId, slug: target.slug, name: target.name, focus: 1 };
+  renderConfirmDialog();
+}
+
+function closeConfirmDialog() {
+  state.confirmDialog = null;
+  renderConfirmDialog();
+}
+
+function renderConfirmDialog() {
+  const overlay = document.getElementById('confirm-overlay');
+  if (!overlay) return;
+  const d = state.confirmDialog;
+  if (!d) { overlay.classList.add('hidden'); overlay.innerHTML = ''; return; }
+  overlay.innerHTML =
+    '<div class="confirm-box">' +
+      '<div class="confirm-msg">Xóa "' + escHtml(d.name) + '" khỏi danh sách?</div>' +
+      '<div class="confirm-actions">' +
+        '<div class="confirm-btn' + (d.focus === 0 ? ' focused' : '') + '">Xóa</div>' +
+        '<div class="confirm-btn' + (d.focus === 1 ? ' focused' : '') + '">Hủy</div>' +
+      '</div>' +
+    '</div>';
+  overlay.classList.remove('hidden');
+}
+
+function handleConfirmDialog(k) {
+  const d = state.confirmDialog;
+  if (!d) return false;
+  if (k === KEY.ENTER && _enterHeld) return true;              // ignore the held-ENTER that opened the dialog
+  if (k === KEY.LEFT || k === KEY.RIGHT) { d.focus = d.focus === 0 ? 1 : 0; renderConfirmDialog(); return true; }
+  if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { closeConfirmDialog(); return true; }
+  if (k === KEY.ENTER) {
+    if (d.focus === 0) removeFromLocalList(d.catId, d.slug);
+    closeConfirmDialog();
+    return true;
+  }
+  return true;
+}
+
+function removeFromLocalList(catId, slug) {
+  try {
+    const key   = catId === 'favorite' ? 'tizenphim_favorites' : 'tizenphim_watchHistory';
+    const store = JSON.parse(localStorage.getItem(key) || '{}');
+    delete store[slug];
+    localStorage.setItem(key, JSON.stringify(store));
+  } catch (_) {}
+  if (state.grid.catId === catId && LOCAL_BUILDERS[catId]) {
+    state.grid.items = LOCAL_BUILDERS[catId]();
+    if (state.grid.focus > state.grid.items.length - 1) state.grid.focus = Math.max(0, state.grid.items.length - 1);
+    renderHome();
+  }
+}
+
 function onKey(e) {
   const k = e.keyCode;
+  if (state.confirmDialog) { if (handleConfirmDialog(k)) e.preventDefault(); return; }
+  if (k === KEY.ENTER && state.screen === 'home' && state.homeZone === 'grid' &&
+      REMOVABLE_CATS[state.grid.catId] && state.grid.items[state.grid.focus]) {
+    e.preventDefault();
+    startEnterPress();
+    return;
+  }
   if (state.screen === 'home')   { if (handleHome(k))   e.preventDefault(); return; }
   if (state.screen === 'search') { if (handleSearch(k)) e.preventDefault(); return; }
   if (state.screen === 'detail') { if (handleDetail(k)) e.preventDefault(); return; }
@@ -224,11 +326,17 @@ function onKey(e) {
 
 // ── Home ──────────────────────────────────────────────────────────────────────
 let _sidebarDebounce = null;
+let _lastProgressSave = 0;
 
 function showHome() {
   showScreen('home');
-  if (!state.grid.catId) loadHomeGrid(CATALOGS[state.sidebarFocus]);
-  else renderHome();
+  if (!state.grid.catId) { loadHomeGrid(CATALOGS[state.sidebarFocus]); return; }
+  if (LOCAL_BUILDERS[state.grid.catId]) {
+    const keep = state.grid.focus;
+    state.grid.items = LOCAL_BUILDERS[state.grid.catId]();
+    state.grid.focus = Math.min(keep, Math.max(0, state.grid.items.length - 1));
+  }
+  renderHome();
 }
 
 function renderHome() {
@@ -249,6 +357,31 @@ function renderSidebar() {
   if (fi) fi.scrollIntoView({ block: 'nearest' });
 }
 
+// Auto-scroll (marquee) a focused card's title when it's too long to fit.
+// The grid rebuilds innerHTML on every focus move, so the animation is
+// discarded automatically once the card loses focus.
+function marqueeTitle(card) {
+  if (!card) return;
+  const title = card.querySelector('.card-title');
+  if (!title || !title.animate) return;
+  if (title.scrollWidth - title.clientWidth <= 2) return;
+  const text = title.innerHTML;
+  title.innerHTML =
+    '<span class="card-title-scroll">' +
+      '<span class="cts-piece">' + text + '</span>' +
+      '<span class="cts-piece" aria-hidden="true">' + text + '</span>' +
+    '</span>';
+  const scroll = title.firstChild;
+  const pieces = scroll.querySelectorAll('.cts-piece');
+  const shift  = pieces[1].offsetLeft - pieces[0].offsetLeft;
+  if (shift <= 2) return;
+  const dur = Math.max(6000, shift * 55);
+  scroll.animate([
+    { transform: 'translateX(0)' },
+    { transform: 'translateX(' + (-shift) + 'px)' },
+  ], { duration: dur, iterations: Infinity, easing: 'linear' });
+}
+
 function renderHomeGrid() {
   const { catName, items, loading, page, hasMore } = state.grid;
   const maxFocus   = items.length + (hasMore ? 1 : 0) - 1;
@@ -256,7 +389,6 @@ function renderHomeGrid() {
   const focus      = Math.max(0, state.grid.focus);
 
   document.getElementById('home-cat-name').textContent  = catName || '';
-  document.getElementById('home-page-info').textContent = hasMore || page > 1 ? 'Trang ' + page : '';
 
   const el             = document.getElementById('home-grid');
   const loadingOverlay = document.getElementById('home-loading');
@@ -276,7 +408,9 @@ function renderHomeGrid() {
   const inGrid    = state.homeZone === 'grid';
   const cardsHtml = items.map(function(m, i) {
     return '<div class="card ' + (inGrid && i === focus ? 'focused' : '') + '">' +
-      '<div class="card-poster" style="background-image:url(\'' + escHtml(imgUrl(m.thumb_url || m.poster_url)) + '\')"></div>' +
+      '<div class="card-poster" style="background-image:url(\'' + escHtml(imgUrl(m.thumb_url || m.poster_url)) + '\')">' +
+        (m._progress != null ? '<div class="card-progress"><div class="card-progress-fill" style="width:' + Math.round(m._progress * 100) + '%"></div></div>' : '') +
+      '</div>' +
       '<div class="card-title">' + escHtml(m.name) + '</div>' +
       '</div>';
   }).join('');
@@ -294,7 +428,7 @@ function renderHomeGrid() {
 
   requestAnimationFrame(function() {
     const fc = el.querySelector('.card.focused');
-    if (fc) fc.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    if (fc) { fc.scrollIntoView({ block: 'nearest', inline: 'nearest' }); marqueeTitle(fc); }
   });
 }
 
@@ -303,7 +437,7 @@ async function loadHomeGrid(cat) {
   state.grid = { catId: cat.id, catName: cat.name, items: [], page: 1, hasMore: false, loading: true, focus: 0 };
   renderHome();
   try {
-    const items = cat.local ? buildContinueWatching() : await fetchCatalog(cat.id, 1);
+    const items = LOCAL_BUILDERS[cat.id] ? LOCAL_BUILDERS[cat.id]() : await fetchCatalog(cat.id, 1);
     state.grid.items   = items;
     state.grid.hasMore = !cat.local && items.length >= 10;
   } catch (_) {}
@@ -467,7 +601,7 @@ function renderSearch() {
     }).join('');
     requestAnimationFrame(function() {
       const fc = el.querySelector('.card.focused');
-      if (fc) fc.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      if (fc) { fc.scrollIntoView({ block: 'nearest', inline: 'nearest' }); marqueeTitle(fc); }
     });
   }
 }
@@ -488,8 +622,9 @@ function handleSearch(k) {
   }
 
   const max  = items.length - 1;
-  const col  = focus % SEARCH_COLS;
-  const row  = Math.floor(focus / SEARCH_COLS);
+  const cols = getGridCols('search-results') || SEARCH_COLS;
+  const col  = focus % cols;
+  const row  = Math.floor(focus / cols);
 
   if (k === KEY.UP) {
     if (row === 0) {
@@ -499,9 +634,9 @@ function handleSearch(k) {
       renderSearch();
       return true;
     }
-    state.search.focus = Math.max(0, focus - SEARCH_COLS);
+    state.search.focus = Math.max(0, focus - cols);
   } else if (k === KEY.DOWN) {
-    state.search.focus = Math.min(max, focus + SEARCH_COLS);
+    state.search.focus = Math.min(max, focus + cols);
   } else if (k === KEY.LEFT) {
     if (col === 0) return false;
     state.search.focus--;
@@ -606,6 +741,8 @@ function renderDetail() {
         '<div class="series-tags">' + tags + '</div>' +
         '<div class="series-desc">' + escHtml((m.content || '').replace(/<[^>]+>/g, '')) + '</div>' +
         (lastEp && lastEpName ? '<div class="series-resume">▶ Tiếp tục: ' + escHtml(lastEpName) + '</div>' : '') +
+        '<div class="fav-btn' + (state.focusZone === 'fav' ? ' focused' : '') + (isFavorite(slug) ? ' active' : '') + '">' +
+          (isFavorite(slug) ? '♥ Đã Thích' : '♡ Yêu Thích') + '</div>' +
         (servers.length > 1 ? '<div class="server-tabs">' + serverTabsHtml + '</div>' : '') +
         '<div class="ep-section-title">Danh sách tập (' + eps.length + ')</div>' +
         '<div class="episodes-grid" id="episodes-grid">' + epGrid + '</div>' +
@@ -628,10 +765,21 @@ function handleDetail(k) {
     return true;
   }
 
+  if (state.focusZone === 'fav') {
+    if (k === KEY.DOWN) { state.focusZone = servers.length > 1 ? 'servers' : 'eps'; state.focusEp = 0; }
+    else if (k === KEY.ENTER) {
+      const m = state.detail && state.detail.movie;
+      toggleFavorite(state.currentSlug, m && m.name, m && (m.thumb_url || m.poster_url));
+    } else { return false; }
+    renderDetail();
+    return true;
+  }
+
   if (state.focusZone === 'servers') {
     const maxSrv = servers.length - 1;
     if (k === KEY.LEFT)  state.focusSrv = Math.max(0, state.focusSrv - 1);
     else if (k === KEY.RIGHT) state.focusSrv = Math.min(maxSrv, state.focusSrv + 1);
+    else if (k === KEY.UP) state.focusZone = 'fav';
     else if (k === KEY.DOWN) { state.focusZone = 'eps'; state.focusEp = 0; }
     else if (k === KEY.ENTER) {
       state.serverIdx = state.focusSrv;
@@ -647,8 +795,8 @@ function handleDetail(k) {
   const col    = state.focusEp % epCols;
 
   if (k === KEY.UP) {
-    if (Math.floor(state.focusEp / epCols) === 0 && servers.length > 1) {
-      state.focusZone = 'servers';
+    if (Math.floor(state.focusEp / epCols) === 0) {
+      state.focusZone = servers.length > 1 ? 'servers' : 'fav';
     } else {
       state.focusEp = Math.max(0, state.focusEp - epCols);
     }
@@ -681,7 +829,16 @@ function playEpisode(epIdx) {
   state.focusEp      = epIdx;
 
   const m = state.detail && state.detail.movie;
-  saveHistory(state.currentSlug, epIdx, m && m.name, m && m.thumb_url);
+  const prev = getHistory()[state.currentSlug];
+  const sameEp = prev && prev.epIdx === epIdx;
+  const resumeTime = (sameEp && prev.time > 5 && (!prev.duration || prev.duration - prev.time > 10)) ? prev.time : 0;
+  saveHistory(state.currentSlug, {
+    epIdx: epIdx,
+    name: m && m.name,
+    poster: m && (m.thumb_url || m.poster_url),
+    time: resumeTime,
+    duration: sameEp ? (prev.duration || 0) : 0,
+  });
 
   showScreen('player');
   const isMovie = eps.length === 1;
@@ -691,15 +848,20 @@ function playEpisode(epIdx) {
   document.getElementById('player-time').textContent = '0:00 / 0:00';
   showOverlayPersistent();
 
-  startPlayback(url);
+  startPlayback(url, resumeTime);
 }
 
-function startPlayback(url) {
+function startPlayback(url, resumeTime) {
   const video = document.getElementById('video');
   if (!video) return;
 
   video.ontimeupdate = updatePlayerBar;
   video.onended      = playNext;
+  video.onloadedmetadata = function() {
+    if (resumeTime && resumeTime > 5 && video.duration && resumeTime < video.duration - 2) {
+      try { video.currentTime = resumeTime; } catch (_) {}
+    }
+  };
   video.src = url;
   video.play().catch(function() {});
   showOverlay();
@@ -707,7 +869,12 @@ function startPlayback(url) {
 
 function stopPlayback() {
   const video = document.getElementById('video');
-  if (video) { video.src = ''; video.ontimeupdate = null; video.onended = null; }
+  if (video) {
+    if (video.duration && state.currentSlug) {
+      saveHistory(state.currentSlug, { epIdx: state.currentEpIdx, time: video.currentTime, duration: video.duration });
+    }
+    video.src = ''; video.ontimeupdate = null; video.onended = null; video.onloadedmetadata = null;
+  }
   clearTimeout(state.overlayTimer);
 }
 
@@ -723,6 +890,11 @@ function updatePlayerBar() {
   const fmt = function(t) { return Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0'); };
   document.getElementById('player-time').textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration);
   document.getElementById('seek-fill').style.width   = ((video.currentTime / video.duration) * 100) + '%';
+  const now = Date.now();
+  if (now - _lastProgressSave > 5000) {
+    _lastProgressSave = now;
+    saveHistory(state.currentSlug, { epIdx: state.currentEpIdx, time: video.currentTime, duration: video.duration });
+  }
 }
 
 function showOverlay() {
@@ -767,10 +939,11 @@ function getHistory() {
   try { return JSON.parse(localStorage.getItem('tizenphim_watchHistory') || '{}'); } catch (_) { return {}; }
 }
 
-function saveHistory(slug, epIdx, name, poster) {
+function saveHistory(slug, patch) {
+  if (!slug) return;
   try {
-    const h  = getHistory();
-    h[slug]  = { epIdx: epIdx, name: name, poster: poster, ts: Date.now() };
+    const h = getHistory();
+    h[slug] = Object.assign({}, h[slug], patch, { ts: Date.now() });
     localStorage.setItem('tizenphim_watchHistory', JSON.stringify(h));
   } catch (_) {}
 }
@@ -783,7 +956,39 @@ function buildContinueWatching() {
     .slice(0, 20)
     .map(function(pair) {
       const slug = pair[0], v = pair[1];
-      return { slug: slug, name: v.name, thumb_url: v.poster || '', poster_url: v.poster || '' };
+      return { slug: slug, name: v.name, thumb_url: v.poster || '', poster_url: v.poster || '', _progress: (v.duration && v.time) ? Math.min(1, Math.max(0, v.time / v.duration)) : null };
+    });
+}
+
+// ── Favorites ───────────────────────────────────────────────────────────────
+function getFavorites() {
+  try { return JSON.parse(localStorage.getItem('tizenphim_favorites') || '{}'); } catch (_) { return {}; }
+}
+
+function isFavorite(slug) {
+  return !!getFavorites()[slug];
+}
+
+function toggleFavorite(slug, name, poster) {
+  if (!slug) return false;
+  try {
+    const f = getFavorites();
+    if (f[slug]) { delete f[slug]; localStorage.setItem('tizenphim_favorites', JSON.stringify(f)); return false; }
+    f[slug] = { slug: slug, name: name, poster: poster, ts: Date.now() };
+    localStorage.setItem('tizenphim_favorites', JSON.stringify(f));
+    return true;
+  } catch (_) { return false; }
+}
+
+function buildFavorites() {
+  const f = getFavorites();
+  return Object.keys(f)
+    .map(function(slug) { return f[slug]; })
+    .filter(function(v) { return v && v.name; })
+    .sort(function(a, b) { return b.ts - a.ts; })
+    .slice(0, 40)
+    .map(function(v) {
+      return { slug: v.slug, name: v.name, thumb_url: v.poster || '', poster_url: v.poster || '' };
     });
 }
 
