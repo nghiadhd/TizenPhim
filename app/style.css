@@ -88,7 +88,7 @@ body {
   mask-image:         linear-gradient(to bottom, black calc(100% - 7.5rem), transparent 100%);
 }
 #home-grid::-webkit-scrollbar { display: none; }
-#home-grid .card        { width: 13.75rem; }
+#home-grid .card        { width: 12.375rem; }
 #home-grid .card-poster { width: 100%; aspect-ratio: 220/310; }
 
 #screen-home.sidebar-collapsed #sidebar {
@@ -189,7 +189,7 @@ body {
   mask-image:         linear-gradient(to bottom, black calc(100% - 7.5rem), transparent 100%);
 }
 #search-results::-webkit-scrollbar { display: none; }
-#search-results .card        { width: 13.75rem; }
+#search-results .card        { width: 12.375rem; }
 #search-results .card-poster { width: 100%; aspect-ratio: 220/310; }
 
 /* ── Detail (= TizenAnime series) ────────────────────────────────────────── */

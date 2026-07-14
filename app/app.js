@@ -383,6 +383,19 @@ function marqueeTitle(card) {
   ], { duration: dur, iterations: Infinity, easing: 'linear' });
 }
 
+function updateGridFocus(containerEl, oldIndex, newIndex, marquee) {
+  const cards = containerEl.children;
+  if (cards[oldIndex]) cards[oldIndex].classList.remove('focused');
+  const nc = cards[newIndex];
+  if (nc) {
+    nc.classList.add('focused');
+    requestAnimationFrame(function() {
+      nc.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      if (marquee) marqueeTitle(nc);
+    });
+  }
+}
+
 function renderHomeGrid() {
   const { catName, items, loading, page, hasMore } = state.grid;
   const maxFocus   = items.length + (hasMore ? 1 : 0) - 1;
@@ -520,19 +533,25 @@ function handleGridKey(k) {
 
   if (max < 0 && k !== KEY.LEFT && k !== KEY.BACK && k !== KEY.ESC && k !== KEY.BACKSPACE) return false;
 
+  let focusOnly = false;
+
   if (k === KEY.LEFT) {
     if (col === 0) { state.homeZone = 'sidebar'; renderHome(); return true; }
     state.grid.focus--;
+    focusOnly = true;
   } else if (k === KEY.RIGHT) {
     if (focus < max) state.grid.focus++;
     else if (!loading) state.grid.focus = 0;
+    focusOnly = true;
   } else if (k === KEY.UP) {
     if (row === 0) state.grid.focus = Math.min(max, (totalRows - 1) * cols + col);
     else state.grid.focus = Math.max(0, focus - cols);
+    focusOnly = true;
   } else if (k === KEY.DOWN) {
     const next = focus + cols;
     if (next <= max) state.grid.focus = next;
     else if (!loading) state.grid.focus = col <= max ? col : 0;
+    focusOnly = true;
   } else if (k === KEY.ENTER) {
     if (hasMore && focus === items.length) { loadMoreHomeGrid(); return true; }
     const item = items[focus];
@@ -542,7 +561,11 @@ function handleGridKey(k) {
     state.homeZone = 'sidebar';
   } else { return false; }
 
-  renderHome();
+  if (focusOnly) {
+    updateGridFocus(document.getElementById('home-grid'), focus, state.grid.focus, true);
+  } else {
+    renderHome();
+  }
   return true;
 }
 
@@ -626,6 +649,7 @@ function handleSearch(k) {
   const cols = getGridCols('search-results') || SEARCH_COLS;
   const col  = focus % cols;
   const row  = Math.floor(focus / cols);
+  let focusOnly = false;
 
   if (k === KEY.UP) {
     if (row === 0) {
@@ -636,14 +660,18 @@ function handleSearch(k) {
       return true;
     }
     state.search.focus = Math.max(0, focus - cols);
+    focusOnly = true;
   } else if (k === KEY.DOWN) {
     state.search.focus = Math.min(max, focus + cols);
+    focusOnly = true;
   } else if (k === KEY.LEFT) {
     if (col === 0) return false;
     state.search.focus--;
+    focusOnly = true;
   } else if (k === KEY.RIGHT) {
     if (focus >= max) return false;
     state.search.focus++;
+    focusOnly = true;
   } else if (k === KEY.ENTER) {
     const item = items[focus];
     if (item) { state.prevScreen = 'search'; showDetail(item.slug); }
@@ -656,7 +684,11 @@ function handleSearch(k) {
     return true;
   } else { return false; }
 
-  renderSearch();
+  if (focusOnly) {
+    updateGridFocus(document.getElementById('search-results'), focus, state.search.focus, true);
+  } else {
+    renderSearch();
+  }
   return true;
 }
 
@@ -791,30 +823,38 @@ function handleDetail(k) {
     return true;
   }
 
-  const max    = eps.length - 1;
-  const epCols = getGridCols('episodes-grid') || EP_COLS;
-  const col    = state.focusEp % epCols;
+  const max        = eps.length - 1;
+  const epCols     = getGridCols('episodes-grid') || EP_COLS;
+  const col        = state.focusEp % epCols;
+  const oldFocusEp = state.focusEp;
+  let focusOnly    = false;
 
   if (k === KEY.UP) {
     if (Math.floor(state.focusEp / epCols) === 0) {
       state.focusZone = servers.length > 1 ? 'servers' : 'fav';
     } else {
       state.focusEp = Math.max(0, state.focusEp - epCols);
+      focusOnly = true;
     }
   } else if (k === KEY.DOWN) {
     state.focusEp = Math.min(max, state.focusEp + epCols);
+    focusOnly = true;
   } else if (k === KEY.LEFT) {
-    if (col > 0) state.focusEp--;
+    if (col > 0) { state.focusEp--; focusOnly = true; }
     else return false;
   } else if (k === KEY.RIGHT) {
-    if (state.focusEp < max) state.focusEp++;
+    if (state.focusEp < max) { state.focusEp++; focusOnly = true; }
     else return false;
   } else if (k === KEY.ENTER) {
     playEpisode(state.focusEp);
     return true;
   } else { return false; }
 
-  renderDetail();
+  if (focusOnly) {
+    updateGridFocus(document.getElementById('episodes-grid'), oldFocusEp, state.focusEp, false);
+  } else {
+    renderDetail();
+  }
   return true;
 }
 
@@ -867,7 +907,15 @@ function startPlayback(url, resumeTime) {
   };
 
   if (window.Hls && window.Hls.isSupported()) {
-    _hls = new window.Hls();
+    _hls = new window.Hls({
+      maxBufferLength: 60,
+      maxMaxBufferLength: 120,
+      maxBufferSize: 90 * 1000 * 1000,
+      fragLoadingMaxRetry: 8,
+      fragLoadingRetryDelay: 1000,
+      manifestLoadingMaxRetry: 6,
+      levelLoadingMaxRetry: 6,
+    });
     _hls.loadSource(url);
     _hls.attachMedia(video);
     _hls.on(window.Hls.Events.MANIFEST_PARSED, function() {
