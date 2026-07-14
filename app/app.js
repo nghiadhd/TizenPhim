@@ -866,11 +866,7 @@ function startPlayback(url, resumeTime) {
     }
   };
 
-  const nativeHls = video.canPlayType('application/vnd.apple.mpegurl');
-  if (nativeHls) {
-    video.src = url;
-    video.play().catch(function() {});
-  } else if (window.Hls && window.Hls.isSupported()) {
+  if (window.Hls && window.Hls.isSupported()) {
     _hls = new window.Hls();
     _hls.loadSource(url);
     _hls.attachMedia(video);
