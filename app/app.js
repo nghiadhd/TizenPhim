@@ -100,6 +100,9 @@ const EP_COLS        = 7;
 const HOME_GRID_COLS = 6;
 const SEARCH_COLS    = 7;
 
+const HEART_SVG = '<svg class="heart-icon" viewBox="0 0 24 24" width="1.1em" height="1.1em" fill="currentColor">' +
+  '<path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>';
+
 // ── Key codes ─────────────────────────────────────────────────────────────────
 const KEY = {
   UP: 38, DOWN: 40, LEFT: 37, RIGHT: 39, ENTER: 13,
@@ -119,7 +122,7 @@ let _enterHeld = false;
 // ── State ─────────────────────────────────────────────────────────────────────
 const state = {
   screen:     'home',
-  prevScreen: 'home',
+  prevScreen: 'browse',
 
   homeZone:     'sidebar',
   sidebarFocus: 3,
@@ -141,6 +144,24 @@ const state = {
   currentEpIdx:    0,
 
   confirmDialog:   null,
+
+  hero:              { item: null, loading: false, zone: 'play' },
+  homeRowZone:       'hero',
+  homeSidebarFocus:  0,
+  rows:              [],
+  rowFocusIndex:     0,
+
+  homeMode: 'rows',
+  catGrid: {
+    catId: null, catName: '',
+    items: [], page: 1, hasMore: false, loading: false, loadingMore: false, focus: 0,
+  },
+
+  playerZone:          'controls',
+  playerControlIndex:  1,
+  currentStreamUrl:    null,
+  playerSettingsOpen:  false,
+  playerSettingsFocus: 0,
 };
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
@@ -219,13 +240,34 @@ function showScreen(name) {
 }
 
 // ── Key handler ───────────────────────────────────────────────────────────────
-function startEnterPress() {
+function getFocusedRemovableItem() {
+  if (state.screen === 'home' && state.homeRowZone === 'row') {
+    const row = state.rows[state.rowFocusIndex];
+    if (!row || !row.loaded) return null;
+    const item = row.items[row.focus];
+    if (!item) return null;
+    return { catId: row.catId, slug: item.slug, name: item.name, fromScreen: 'home' };
+  }
+  if (state.screen === 'browse' && state.homeZone === 'grid') {
+    const item = state.grid.items[state.grid.focus];
+    if (!item) return null;
+    return { catId: state.grid.catId, slug: item.slug, name: item.name, fromScreen: 'browse' };
+  }
+  if (state.screen === 'home' && state.homeMode === 'category' && state.homeRowZone === 'grid') {
+    const g = state.catGrid;
+    if (!LOCAL_BUILDERS[g.catId]) return null;
+    const item = g.items[g.focus];
+    if (!item) return null;
+    return { catId: g.catId, slug: item.slug, name: item.name, fromScreen: 'home' };
+  }
+  return null;
+}
+
+function startEnterPress(target) {
   if (_pressTimer || state.confirmDialog) return;
-  const item = state.grid.items[state.grid.focus];
-  if (!item) return;
   _pressFired = false;
   _enterHeld  = true;
-  _pressTarget = { catId: state.grid.catId, slug: item.slug, name: item.name };
+  _pressTarget = target;
   _pressTimer = setTimeout(function() {
     _pressTimer = null;
     _pressFired = true;
@@ -240,7 +282,7 @@ function onKeyUp(e) {
     clearTimeout(_pressTimer);
     _pressTimer = null;
     if (!_pressFired && _pressTarget) {
-      state.prevScreen = 'home';
+      state.prevScreen = _pressTarget.fromScreen;
       showDetail(_pressTarget.slug);
     }
   }
@@ -305,43 +347,646 @@ function removeFromLocalList(catId, slug) {
   if (state.grid.catId === catId && LOCAL_BUILDERS[catId]) {
     state.grid.items = LOCAL_BUILDERS[catId]();
     if (state.grid.focus > state.grid.items.length - 1) state.grid.focus = Math.max(0, state.grid.items.length - 1);
-    renderHome();
+    renderBrowseScreen();
+  }
+  if (state.catGrid.catId === catId && LOCAL_BUILDERS[catId]) {
+    state.catGrid.items = LOCAL_BUILDERS[catId]();
+    if (state.catGrid.focus > state.catGrid.items.length - 1) state.catGrid.focus = Math.max(0, state.catGrid.items.length - 1);
+    renderCategoryGrid();
+    renderHomeScreen();
+  }
+  const row = state.rows.find(function(r) { return r.catId === catId; });
+  if (row && LOCAL_BUILDERS[catId]) {
+    row.items = LOCAL_BUILDERS[catId]();
+    if (row.focus > row.items.length - 1) row.focus = Math.max(0, row.items.length - 1);
+    renderHomeRow(row);
+    renderHomeSidebar();
   }
 }
 
 function onKey(e) {
   const k = e.keyCode;
   if (state.confirmDialog) { if (handleConfirmDialog(k)) e.preventDefault(); return; }
-  if (k === KEY.ENTER && state.screen === 'home' && state.homeZone === 'grid' &&
-      REMOVABLE_CATS[state.grid.catId] && state.grid.items[state.grid.focus]) {
-    e.preventDefault();
-    startEnterPress();
-    return;
+  if (state.playerSettingsOpen) { if (handlePlayerSettings(k)) e.preventDefault(); return; }
+  if (k === KEY.ENTER) {
+    const target = getFocusedRemovableItem();
+    if (target && REMOVABLE_CATS[target.catId]) {
+      e.preventDefault();
+      startEnterPress(target);
+      return;
+    }
   }
-  if (state.screen === 'home')   { if (handleHome(k))   e.preventDefault(); return; }
+  if (state.screen === 'home')   { if (handleHomeScreen(k)) e.preventDefault(); return; }
+  if (state.screen === 'browse') { if (handleBrowse(k)) e.preventDefault(); return; }
   if (state.screen === 'search') { if (handleSearch(k)) e.preventDefault(); return; }
   if (state.screen === 'detail') { if (handleDetail(k)) e.preventDefault(); return; }
   if (state.screen === 'player') { if (handlePlayer(k)) e.preventDefault(); return; }
 }
 
-// ── Home ──────────────────────────────────────────────────────────────────────
+// ── Home (hero) ──────────────────────────────────────────────────────────────
+const HERO_SOURCE_CAT = 'phim-moi';
+
+function showHome() {
+  showScreen('home');
+  if (!state.rows.length) {
+    state.rows = buildHomeRows();
+    renderHomeRows();
+  }
+  if (!state.hero.item && !state.hero.loading) loadHomeHero();
+  renderHomeScreen();
+}
+
+async function loadHomeHero() {
+  state.hero.loading = true;
+  renderHomeScreen();
+  try {
+    const items = await fetchCatalog(HERO_SOURCE_CAT, 1);
+    state.hero.item = items[0] || null;
+    const heroRow = state.rows.find(function(r) { return r.catId === HERO_SOURCE_CAT; });
+    if (heroRow && !heroRow.loaded) {
+      heroRow.items   = items;
+      heroRow.loading = false;
+      heroRow.loaded  = true;
+      heroRow.hasMore = items.length >= 10;
+      renderHomeRow(heroRow);
+    }
+  } catch (_) {}
+  state.hero.loading = false;
+  renderHomeScreen();
+}
+
+function getDisplayedHeroItem() {
+  if (state.homeMode === 'category') {
+    const g = state.catGrid;
+    if (state.homeRowZone === 'grid' && g.items[g.focus]) return g.items[g.focus];
+    return g.items[0] || null;
+  }
+  if (state.homeRowZone === 'row') {
+    const row = state.rows[state.rowFocusIndex];
+    if (row && row.loaded && row.items[row.focus]) return row.items[row.focus];
+  }
+  return state.hero.item;
+}
+
+const HOME_SIDEBAR_ALL_IDS = [
+  'home-nav-home', 'home-search-btn', 'home-nav-continue', 'home-nav-favorite',
+  'home-nav-movies', 'home-nav-series',
+];
+
+function getHomeSidebarIds() {
+  const ids = ['home-nav-home', 'home-search-btn'];
+  const continueRow = state.rows.find(function(r) { return r.catId === 'continue'; });
+  const favRow      = state.rows.find(function(r) { return r.catId === 'favorite'; });
+  if (continueRow && continueRow.items.length) ids.push('home-nav-continue');
+  if (favRow && favRow.items.length)           ids.push('home-nav-favorite');
+  ids.push('home-nav-movies', 'home-nav-series');
+  return ids;
+}
+
+function renderHomeSidebar() {
+  const ids = getHomeSidebarIds();
+  HOME_SIDEBAR_ALL_IDS.forEach(function(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle('hidden', ids.indexOf(id) === -1);
+    el.classList.remove('focused');
+  });
+  const sidebarEl = document.getElementById('home-sidebar');
+  if (sidebarEl) sidebarEl.classList.toggle('expanded', state.homeRowZone === 'sidebar');
+  if (state.homeRowZone === 'sidebar') {
+    const activeId = ids[state.homeSidebarFocus];
+    const el = activeId && document.getElementById(activeId);
+    if (el) el.classList.add('focused');
+  }
+}
+
+function updateHomeSectionVisibility() {
+  const rowsEl = document.getElementById('home-rows');
+  const gridEl = document.getElementById('home-catgrid');
+  const isCategory = state.homeMode === 'category';
+  if (rowsEl) rowsEl.classList.toggle('hidden', isCategory);
+  if (gridEl) gridEl.classList.toggle('hidden', !isCategory);
+}
+
+function renderHomeScreen() {
+  renderHomeSidebar();
+  updateHomeSectionVisibility();
+
+  const item      = getDisplayedHeroItem();
+  const backdrop  = document.getElementById('home-hero-backdrop');
+  const title     = document.getElementById('home-hero-title');
+  const tags      = document.getElementById('home-hero-tags');
+  const desc      = document.getElementById('home-hero-desc');
+  const playBtn   = document.getElementById('home-hero-play');
+  const infoBtn   = document.getElementById('home-hero-info');
+  const loadingEl = document.getElementById('home-hero-loading');
+
+  const heroLoading = state.homeMode === 'category'
+    ? (state.catGrid.loading && !state.catGrid.items.length)
+    : state.hero.loading;
+  if (loadingEl) loadingEl.classList.toggle('hidden', !heroLoading);
+
+  if (item) {
+    if (backdrop) backdrop.style.backgroundImage = 'url(\'' + escHtml(imgUrl(item.thumb_url || item.poster_url)) + '\')';
+    if (title) title.textContent = item.name || '';
+    if (tags) {
+      tags.innerHTML = [
+        item.quality ? '<span class="tag quality">' + escHtml(item.quality) + '</span>' : '',
+        item.lang    ? '<span class="tag">' + escHtml(item.lang) + '</span>' : '',
+        item.year    ? '<span class="tag">' + escHtml(String(item.year)) + '</span>' : '',
+      ].filter(Boolean).join('');
+    }
+    if (desc) desc.textContent = item.origin_name || '';
+  } else {
+    if (backdrop) backdrop.style.backgroundImage = '';
+    if (title) title.textContent = '';
+    if (tags) tags.innerHTML = '';
+    if (desc) desc.textContent = '';
+  }
+
+  if (playBtn) playBtn.classList.toggle('focused', state.homeRowZone === 'hero' && state.hero.zone === 'play');
+  if (infoBtn) infoBtn.classList.toggle('focused', state.homeRowZone === 'hero' && state.hero.zone === 'info');
+}
+
+function handleHomeScreen(k) {
+  if ((k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) && state.homeMode === 'category') {
+    exitCategoryGrid();
+    return true;
+  }
+  if (state.homeRowZone === 'sidebar') return handleHomeSidebarKey(k);
+  if (state.homeRowZone === 'hero')    return handleHomeHeroKey(k);
+  if (state.homeRowZone === 'grid')    return handleHomeCategoryGridKey(k);
+  return handleHomeRowKey(k);
+}
+
+function handleHomeSidebarKey(k) {
+  const ids = getHomeSidebarIds();
+  if (k === KEY.RIGHT) {
+    state.homeRowZone = 'hero';
+  } else if (k === KEY.UP) {
+    state.homeSidebarFocus = Math.max(0, state.homeSidebarFocus - 1);
+  } else if (k === KEY.DOWN) {
+    state.homeSidebarFocus = Math.min(ids.length - 1, state.homeSidebarFocus + 1);
+  } else if (k === KEY.ENTER) {
+    activateHomeSidebarIcon(ids[state.homeSidebarFocus]);
+    return true;
+  } else { return false; }
+  renderHomeScreen();
+  return true;
+}
+
+function activateHomeSidebarIcon(id) {
+  if (id === 'home-nav-home') {
+    state.homeMode = 'rows';
+    const scrollEl = document.getElementById('home-scroll');
+    if (scrollEl) scrollEl.scrollTo({ top: 0, behavior: 'smooth' });
+    state.homeRowZone = 'hero';
+    renderHomeScreen();
+  } else if (id === 'home-search-btn') {
+    showSearch();
+  } else if (id === 'home-nav-continue') {
+    openCategoryGrid('continue');
+  } else if (id === 'home-nav-favorite') {
+    openCategoryGrid('favorite');
+  } else if (id === 'home-nav-movies') {
+    openCategoryGrid('phim-le');
+  } else if (id === 'home-nav-series') {
+    openCategoryGrid('phim-bo');
+  }
+}
+
+function openCategoryGrid(catId) {
+  const cat = CATALOGS.find(function(c) { return c.id === catId; });
+  if (!cat) return;
+  state.homeMode    = 'category';
+  state.homeRowZone = 'hero';
+  state.catGrid = {
+    catId: cat.id, catName: cat.name,
+    items: [], page: 1, hasMore: false, loading: true, loadingMore: false, focus: 0,
+  };
+  const scrollEl = document.getElementById('home-scroll');
+  if (scrollEl) scrollEl.scrollTo({ top: 0 });
+  renderHomeScreen();
+  renderCategoryGrid();
+  loadCategoryGrid();
+}
+
+function exitCategoryGrid() {
+  state.homeMode     = 'rows';
+  state.homeRowZone  = 'hero';
+  renderHomeScreen();
+}
+
+async function loadCategoryGrid() {
+  const g = state.catGrid;
+  if (LOCAL_BUILDERS[g.catId]) {
+    g.items   = LOCAL_BUILDERS[g.catId]();
+    g.hasMore = false;
+    g.loading = false;
+    renderHomeScreen();
+    renderCategoryGrid();
+    return;
+  }
+  try {
+    const items = await fetchCatalog(g.catId, g.page);
+    g.items   = g.items.concat(items);
+    g.hasMore = items.length >= 10;
+  } catch (_) {}
+  g.loading = false;
+  renderHomeScreen();
+  renderCategoryGrid();
+}
+
+async function loadMoreCategoryGrid() {
+  const g = state.catGrid;
+  if (g.loading || g.loadingMore || !g.hasMore) return;
+  g.loadingMore = true;
+  g.page++;
+  renderCategoryGrid();
+  try {
+    const more = await fetchCatalog(g.catId, g.page);
+    g.items   = g.items.concat(more);
+    g.hasMore = more.length >= 10;
+  } catch (_) {}
+  g.loadingMore = false;
+  renderCategoryGrid();
+}
+
+function renderCategoryGrid() {
+  const g       = state.catGrid;
+  const titleEl = document.getElementById('home-catgrid-title');
+  const gridEl  = document.getElementById('home-catgrid-items');
+  if (!gridEl) return;
+  if (titleEl) titleEl.textContent = g.catName || '';
+
+  const inGrid   = state.homeRowZone === 'grid';
+  const maxFocus = g.items.length - 1 + (g.hasMore ? 1 : 0);
+  if (maxFocus >= 0 && g.focus > maxFocus) g.focus = maxFocus;
+
+  if (g.loading && !g.items.length) {
+    gridEl.innerHTML = new Array(12).fill(0).map(function() {
+      return '<div class="card"><div class="card-poster loading-card"></div><div class="card-title">&nbsp;</div></div>';
+    }).join('');
+    return;
+  }
+
+  const cardsHtml = g.items.map(function(m, i) {
+    return '<div class="card ' + (inGrid && i === g.focus ? 'focused' : '') + '">' +
+      '<div class="card-poster" style="background-image:url(\'' + escHtml(imgUrl(m.poster_url || m.thumb_url)) + '\')">' +
+        (m._progress != null ? '<div class="card-progress"><div class="card-progress-fill" style="width:' + Math.round(m._progress * 100) + '%"></div></div>' : '') +
+      '</div>' +
+      '<div class="card-title">' + escHtml(m.name) + '</div>' +
+      '</div>';
+  }).join('');
+
+  const loadMoreIdx  = g.items.length;
+  const loadMoreHtml = g.hasMore
+    ? '<div class="card card-load-more ' + (inGrid && loadMoreIdx === g.focus ? 'focused' : '') + '">' +
+        '<div class="card-load-more-icon">' + (g.loadingMore ? '…' : '+') + '</div>' +
+        '<div class="card-title">Tải thêm</div>' +
+      '</div>'
+    : '';
+
+  gridEl.innerHTML = cardsHtml + loadMoreHtml;
+
+  requestAnimationFrame(function() {
+    const fc = gridEl.querySelector('.card.focused');
+    if (fc) { fc.scrollIntoView({ block: 'nearest', inline: 'nearest' }); marqueeTitle(fc); }
+  });
+}
+
+function handleHomeCategoryGridKey(k) {
+  const g     = state.catGrid;
+  const items = g.items;
+  const totalCount = items.length + (g.hasMore ? 1 : 0);
+  const max   = totalCount - 1;
+  const cols  = HOME_GRID_COLS;
+  const col   = g.focus % cols;
+  const row   = Math.floor(g.focus / cols);
+
+  if (max < 0) return false;
+
+  const oldFocus = g.focus;
+  let focusOnly  = false;
+
+  if (k === KEY.UP) {
+    if (row === 0) {
+      state.homeRowZone = 'hero';
+      renderHomeScreen();
+      return true;
+    }
+    g.focus = Math.max(0, g.focus - cols);
+    focusOnly = true;
+  } else if (k === KEY.DOWN) {
+    const next = g.focus + cols;
+    if (next > max) return false;
+    g.focus = next;
+    focusOnly = true;
+  } else if (k === KEY.LEFT) {
+    if (col === 0) {
+      state.homeRowZone = 'sidebar';
+      renderHomeScreen();
+      return true;
+    }
+    g.focus--;
+    focusOnly = true;
+  } else if (k === KEY.RIGHT) {
+    if (g.focus >= max) return false;
+    g.focus++;
+    focusOnly = true;
+  } else if (k === KEY.ENTER) {
+    if (g.hasMore && g.focus === items.length) { loadMoreCategoryGrid(); return true; }
+    const item = items[g.focus];
+    if (item) { state.prevScreen = 'home'; showDetail(item.slug); }
+    return true;
+  } else { return false; }
+
+  if (focusOnly) {
+    updateGridFocus(document.getElementById('home-catgrid-items'), oldFocus, g.focus, true);
+    renderHomeScreen();
+  }
+  return true;
+}
+
+function handleHomeHeroKey(k) {
+  if (k === KEY.RIGHT) {
+    state.hero.zone = 'info';
+  } else if (k === KEY.LEFT) {
+    if (state.hero.zone === 'info') { state.hero.zone = 'play'; }
+    else { state.homeRowZone = 'sidebar'; }
+  } else if (k === KEY.UP) {
+    state.homeRowZone = 'sidebar';
+  } else if (k === KEY.DOWN) {
+    if (state.homeMode === 'category') {
+      if (!state.catGrid.items.length) return false;
+      state.homeRowZone = 'grid';
+      renderHomeScreen();
+      renderCategoryGrid();
+      return true;
+    }
+    if (!state.rows.length) return false;
+    enterHomeRowZone(0);
+    return true;
+  } else if (k === KEY.ENTER) {
+    const item = getDisplayedHeroItem();
+    if (!item) return true;
+    state.prevScreen = 'home';
+    showDetail(item.slug, state.hero.zone === 'play');
+    return true;
+  } else { return false; }
+  renderHomeScreen();
+  return true;
+}
+
+function handleHomeRowKey(k) {
+  const i   = state.rowFocusIndex;
+  const row = state.rows[i];
+  if (!row) return false;
+
+  if (k === KEY.UP) {
+    if (i === 0) {
+      state.homeRowZone = 'hero';
+      updateHomeRowFocusVisuals(i);
+      renderHomeScreen();
+    } else {
+      moveHomeRowFocus(i - 1);
+    }
+    return true;
+  }
+  if (k === KEY.DOWN) {
+    if (i >= state.rows.length - 1) return false;
+    moveHomeRowFocus(i + 1);
+    return true;
+  }
+  if (k === KEY.LEFT) {
+    if (!row.loaded || row.focus <= 0) {
+      state.homeRowZone = 'sidebar';
+      updateHomeRowFocusVisuals(i);
+      renderHomeScreen();
+      return true;
+    }
+    row.focus--;
+    renderHomeRowTrack(row, i);
+    renderHomeScreen();
+    return true;
+  }
+  if (k === KEY.RIGHT) {
+    if (!row.loaded) return false;
+    const maxFocus = row.items.length - 1 + (row.hasMore ? 1 : 0);
+    if (row.focus >= maxFocus) return false;
+    row.focus++;
+    renderHomeRowTrack(row, i);
+    renderHomeScreen();
+    return true;
+  }
+  if (k === KEY.ENTER) {
+    if (!row.loaded) return true;
+    if (row.hasMore && row.focus === row.items.length) { loadMoreHomeRow(row); return true; }
+    const item = row.items[row.focus];
+    if (item) { state.prevScreen = 'home'; showDetail(item.slug); }
+    return true;
+  }
+  return false;
+}
+
+function enterHomeRowZone(index) {
+  state.homeRowZone   = 'row';
+  state.rowFocusIndex = index;
+  ensureRowLoaded(state.rows[index]);
+  renderHomeScreen();
+  updateHomeRowFocusVisuals(index);
+  scrollHomeRowIntoView(index);
+}
+
+function moveHomeRowFocus(newIndex) {
+  const oldIndex = state.rowFocusIndex;
+  state.rowFocusIndex = newIndex;
+  ensureRowLoaded(state.rows[newIndex]);
+  updateHomeRowFocusVisuals(oldIndex);
+  updateHomeRowFocusVisuals(newIndex);
+  renderHomeScreen();
+  scrollHomeRowIntoView(newIndex);
+}
+
+function updateHomeRowFocusVisuals(i) {
+  const row = state.rows[i];
+  if (!row) return;
+  const shellEl = document.querySelector('.home-row[data-row-index="' + i + '"]');
+  if (shellEl) shellEl.classList.toggle('focused', state.homeRowZone === 'row' && state.rowFocusIndex === i);
+  renderHomeRowTrack(row, i);
+}
+
+function scrollHomeRowIntoView(i) {
+  const shellEl = document.querySelector('.home-row[data-row-index="' + i + '"]');
+  if (shellEl) requestAnimationFrame(function() { shellEl.scrollIntoView({ block: 'nearest' }); });
+}
+
+function buildHomeRows() {
+  const rows = [];
+  CATALOGS.forEach(function(cat) {
+    if (cat.id === 'search') return;
+    if (LOCAL_BUILDERS[cat.id]) {
+      const items = LOCAL_BUILDERS[cat.id]();
+      if (!items.length) return;
+      rows.push({ catId: cat.id, catName: cat.name, isLocal: true, items: items, loading: false, loaded: true, focus: 0, page: 1, hasMore: false });
+    } else {
+      const isHeroSource = cat.id === HERO_SOURCE_CAT;
+      rows.push({ catId: cat.id, catName: cat.name, isLocal: false, items: [], loading: isHeroSource, loaded: false, focus: 0, page: 1, hasMore: false });
+    }
+  });
+  return rows;
+}
+
+function renderHomeRows() {
+  const el = document.getElementById('home-rows');
+  if (!el) return;
+  el.innerHTML = state.rows.map(function(row, i) {
+    return '<div class="home-row" data-row-index="' + i + '">' +
+      '<div class="home-row-title">' + escHtml(row.catName) + '</div>' +
+      '<div class="home-row-track" id="home-row-track-' + i + '"></div>' +
+      '</div>';
+  }).join('');
+  state.rows.forEach(function(row, i) { renderHomeRowTrack(row, i); });
+  observeHomeRows();
+}
+
+function renderHomeRow(row) {
+  const i = state.rows.indexOf(row);
+  if (i === -1) return;
+  renderHomeRowTrack(row, i);
+  if (row.loaded && _homeRowObserver) {
+    const el = document.querySelector('.home-row[data-row-index="' + i + '"]');
+    if (el) _homeRowObserver.unobserve(el);
+  }
+  if (state.homeRowZone === 'row' && state.rowFocusIndex === i) renderHomeScreen();
+}
+
+function renderHomeRowTrack(row, i) {
+  const track = document.getElementById('home-row-track-' + i);
+  if (!track) return;
+  const isFocusedRow = state.homeRowZone === 'row' && state.rowFocusIndex === i;
+
+  if (!row.loaded) {
+    track.innerHTML = new Array(6).fill(0).map(function() {
+      return '<div class="card"><div class="card-poster loading-card"></div><div class="card-title">&nbsp;</div></div>';
+    }).join('');
+    return;
+  }
+
+  const cardsHtml = row.items.map(function(m, ci) {
+    return '<div class="card ' + (isFocusedRow && ci === row.focus ? 'focused' : '') + '">' +
+      '<div class="card-poster" style="background-image:url(\'' + escHtml(imgUrl(m.poster_url || m.thumb_url)) + '\')">' +
+        (m._progress != null ? '<div class="card-progress"><div class="card-progress-fill" style="width:' + Math.round(m._progress * 100) + '%"></div></div>' : '') +
+      '</div>' +
+      '<div class="card-title">' + escHtml(m.name) + '</div>' +
+      '</div>';
+  }).join('');
+
+  const loadMoreIdx  = row.items.length;
+  const loadMoreHtml = row.hasMore
+    ? '<div class="card card-load-more ' + (isFocusedRow && loadMoreIdx === row.focus ? 'focused' : '') + '">' +
+        '<div class="card-load-more-icon">' + (row.loadingMore ? '…' : '+') + '</div>' +
+        '<div class="card-title">Tải thêm</div>' +
+      '</div>'
+    : '';
+
+  track.innerHTML = cardsHtml + loadMoreHtml;
+
+  if (isFocusedRow) {
+    requestAnimationFrame(function() {
+      const fc = track.querySelector('.card.focused');
+      if (fc) { fc.scrollIntoView({ block: 'nearest', inline: 'nearest' }); marqueeTitle(fc); }
+    });
+  }
+}
+
+let _homeRowObserver = null;
+let _activeRowFetches = 0;
+const MAX_CONCURRENT_ROW_FETCHES = 3;
+let _pendingRowFetches = [];
+
+function ensureRowLoaded(row) {
+  if (!row || row.loaded || row.loading) return;
+  row.loading = true;
+  _pendingRowFetches.push(row);
+  _drainRowFetchQueue();
+}
+
+function _drainRowFetchQueue() {
+  while (_activeRowFetches < MAX_CONCURRENT_ROW_FETCHES && _pendingRowFetches.length) {
+    const row = _pendingRowFetches.shift();
+    _activeRowFetches++;
+    fetchCatalog(row.catId, 1)
+      .then(function(items) { row.items = items; row.hasMore = items.length >= 10; })
+      .catch(function() { row.items = []; row.hasMore = false; })
+      .then(function() {
+        row.loading = false;
+        row.loaded  = true;
+        _activeRowFetches--;
+        renderHomeRow(row);
+        _drainRowFetchQueue();
+      });
+  }
+}
+
+async function loadMoreHomeRow(row) {
+  if (row.isLocal || !row.hasMore || row.loadingMore) return;
+  row.loadingMore = true;
+  const i = state.rows.indexOf(row);
+  renderHomeRowTrack(row, i);
+  try {
+    const more = await fetchCatalog(row.catId, row.page + 1);
+    row.items   = row.items.concat(more);
+    row.page++;
+    row.hasMore = more.length >= 10;
+  } catch (_) {
+    row.hasMore = false;
+  }
+  row.loadingMore = false;
+  renderHomeRowTrack(row, i);
+}
+
+function observeHomeRows() {
+  if (_homeRowObserver) { _homeRowObserver.disconnect(); }
+  if (!window.IntersectionObserver) {
+    state.rows.forEach(function(row) { ensureRowLoaded(row); });
+    return;
+  }
+  const root = document.getElementById('home-scroll');
+  _homeRowObserver = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (!entry.isIntersecting) return;
+      const idx = Number(entry.target.getAttribute('data-row-index'));
+      const row = state.rows[idx];
+      if (row) ensureRowLoaded(row);
+    });
+  }, { root: root, rootMargin: '0px 0px 900px 0px' });
+
+  document.querySelectorAll('.home-row').forEach(function(el) {
+    const idx = Number(el.getAttribute('data-row-index'));
+    const row = state.rows[idx];
+    if (row && !row.loaded) _homeRowObserver.observe(el);
+  });
+}
+
+// ── Browse ────────────────────────────────────────────────────────────────────
 let _sidebarDebounce = null;
 let _lastProgressSave = 0;
 let _hls = null;
 
-function showHome() {
-  showScreen('home');
+function showBrowse() {
+  showScreen('browse');
   if (!state.grid.catId) { loadHomeGrid(CATALOGS[state.sidebarFocus]); return; }
   if (LOCAL_BUILDERS[state.grid.catId]) {
     const keep = state.grid.focus;
     state.grid.items = LOCAL_BUILDERS[state.grid.catId]();
     state.grid.focus = Math.min(keep, Math.max(0, state.grid.items.length - 1));
   }
-  renderHome();
+  renderBrowseScreen();
 }
 
-function renderHome() {
-  const home = document.getElementById('screen-home');
+function renderBrowseScreen() {
+  const home = document.getElementById('screen-browse');
   if (home) home.classList.toggle('sidebar-collapsed', state.homeZone === 'grid');
   renderSidebar();
   renderHomeGrid();
@@ -376,10 +1021,12 @@ function marqueeTitle(card) {
   const pieces = scroll.querySelectorAll('.cts-piece');
   const shift  = pieces[1].offsetLeft - pieces[0].offsetLeft;
   if (shift <= 2) return;
-  const dur = Math.max(6000, shift * 55);
+  const dur = Math.max(9000, shift * 70);
   scroll.animate([
-    { transform: 'translateX(0)' },
-    { transform: 'translateX(' + (-shift) + 'px)' },
+    { transform: 'translateX(0)',            offset: 0    },
+    { transform: 'translateX(0)',            offset: 0.35 },
+    { transform: 'translateX(' + (-shift) + 'px)', offset: 0.85 },
+    { transform: 'translateX(' + (-shift) + 'px)', offset: 1    },
   ], { duration: dur, iterations: Infinity, easing: 'linear' });
 }
 
@@ -449,14 +1096,14 @@ function renderHomeGrid() {
 async function loadHomeGrid(cat) {
   if (cat.id === 'search') return;
   state.grid = { catId: cat.id, catName: cat.name, items: [], page: 1, hasMore: false, loading: true, focus: 0 };
-  renderHome();
+  renderBrowseScreen();
   try {
     const items = LOCAL_BUILDERS[cat.id] ? LOCAL_BUILDERS[cat.id]() : await fetchCatalog(cat.id, 1);
     state.grid.items   = items;
     state.grid.hasMore = !cat.local && items.length >= 10;
   } catch (_) {}
   state.grid.loading = false;
-  renderHome();
+  renderBrowseScreen();
 }
 
 async function loadMoreHomeGrid() {
@@ -470,10 +1117,10 @@ async function loadMoreHomeGrid() {
     state.grid.hasMore = more.length >= 10;
   } catch (_) {}
   state.grid.loading = false;
-  renderHome();
+  renderBrowseScreen();
 }
 
-function handleHome(k) {
+function handleBrowse(k) {
   return state.homeZone === 'sidebar' ? handleSidebarKey(k) : handleGridKey(k);
 }
 
@@ -495,7 +1142,7 @@ function handleSidebarKey(k) {
     if (needsLoad) loadHomeGrid(cat);
     state.homeZone = 'grid';
     state.grid.focus = 0;
-    if (!needsLoad) renderHome();
+    if (!needsLoad) renderBrowseScreen();
     return true;
   } else { return false; }
   return true;
@@ -524,7 +1171,7 @@ function handleGridKey(k) {
   let focusOnly = false;
 
   if (k === KEY.LEFT) {
-    if (col === 0) { state.homeZone = 'sidebar'; renderHome(); return true; }
+    if (col === 0) { state.homeZone = 'sidebar'; renderBrowseScreen(); return true; }
     state.grid.focus--;
     focusOnly = true;
   } else if (k === KEY.RIGHT) {
@@ -543,7 +1190,7 @@ function handleGridKey(k) {
   } else if (k === KEY.ENTER) {
     if (hasMore && focus === items.length) { loadMoreHomeGrid(); return true; }
     const item = items[focus];
-    if (item) { state.prevScreen = 'home'; showDetail(item.slug); }
+    if (item) { state.prevScreen = 'browse'; showDetail(item.slug); }
     return true;
   } else if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) {
     state.homeZone = 'sidebar';
@@ -552,7 +1199,7 @@ function handleGridKey(k) {
   if (focusOnly) {
     updateGridFocus(document.getElementById('home-grid'), focus, state.grid.focus, true);
   } else {
-    renderHome();
+    renderBrowseScreen();
   }
   return true;
 }
@@ -681,7 +1328,7 @@ function handleSearch(k) {
 }
 
 // ── Detail ────────────────────────────────────────────────────────────────────
-async function showDetail(slug) {
+async function showDetail(slug, autoplay) {
   showScreen('detail');
   document.getElementById('detail-content').innerHTML = '<div class="loading-msg"><div class="spinner"></div></div>';
 
@@ -703,6 +1350,7 @@ async function showDetail(slug) {
     }
 
     renderDetail();
+    if (autoplay) playEpisode(state.focusEp);
   } catch (e) {
     document.getElementById('detail-content').innerHTML =
       '<div class="error-msg">Không tải được nội dung.<br>' + escHtml(e.message) + '</div>';
@@ -763,7 +1411,7 @@ function renderDetail() {
         '<div class="series-desc">' + escHtml((m.content || '').replace(/<[^>]+>/g, '')) + '</div>' +
         (lastEp && lastEpName ? '<div class="series-resume">▶ Tiếp tục: ' + escHtml(lastEpName) + '</div>' : '') +
         '<div class="fav-btn' + (state.focusZone === 'fav' ? ' focused' : '') + (isFavorite(slug) ? ' active' : '') + '">' +
-          (isFavorite(slug) ? '♥ Đã Thích' : '♡ Yêu Thích') + '</div>' +
+          HEART_SVG + (isFavorite(slug) ? 'Đã Thích' : 'Yêu Thích') + '</div>' +
         (servers.length > 1 ? '<div class="server-tabs">' + serverTabsHtml + '</div>' : '') +
         '<div class="ep-section-title">Danh sách tập (' + eps.length + ')</div>' +
         '<div class="episodes-grid" id="episodes-grid">' + epGrid + '</div>' +
@@ -782,7 +1430,8 @@ function handleDetail(k) {
 
   if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) {
     if (state.prevScreen === 'search') showSearch(false);
-    else showHome();
+    else if (state.prevScreen === 'home') showHome();
+    else showBrowse();
     return true;
   }
 
@@ -847,6 +1496,25 @@ function handleDetail(k) {
 }
 
 // ── Player ────────────────────────────────────────────────────────────────────
+const BUFFER_PRESETS = {
+  low:    { label: 'Thấp (tiết kiệm dữ liệu)', maxBufferLength: 20,  maxMaxBufferLength: 40,  maxBufferSize: 30  * 1000 * 1000, fragLoadingMaxRetry: 4,  manifestLoadingMaxRetry: 3, levelLoadingMaxRetry: 3 },
+  normal: { label: 'Bình thường',              maxBufferLength: 60,  maxMaxBufferLength: 120, maxBufferSize: 90  * 1000 * 1000, fragLoadingMaxRetry: 8,  manifestLoadingMaxRetry: 6, levelLoadingMaxRetry: 6 },
+  high:   { label: 'Cao (mạng yếu/chập chờn)',  maxBufferLength: 120, maxMaxBufferLength: 240, maxBufferSize: 180 * 1000 * 1000, fragLoadingMaxRetry: 10, manifestLoadingMaxRetry: 8, levelLoadingMaxRetry: 8 },
+};
+const BUFFER_LEVEL_ORDER = ['low', 'normal', 'high'];
+
+function getBufferLevel() {
+  try {
+    const v = localStorage.getItem('tizenphim_bufferLevel');
+    if (v && BUFFER_PRESETS[v]) return v;
+  } catch (_) {}
+  return 'normal';
+}
+
+function setBufferLevel(level) {
+  try { localStorage.setItem('tizenphim_bufferLevel', level); } catch (_) {}
+}
+
 function playEpisode(epIdx) {
   const eps = currentEps();
   if (!eps[epIdx]) return;
@@ -871,13 +1539,178 @@ function playEpisode(epIdx) {
 
   showScreen('player');
   const isMovie = eps.length === 1;
-  document.getElementById('player-title').textContent =
-    ((m && m.name) || '') + (isMovie ? '' : ' — ' + ep.name);
-  document.getElementById('seek-fill').style.width  = '0%';
-  document.getElementById('player-time').textContent = '0:00 / 0:00';
+  const titleEl = document.getElementById('player-title');
+  if (titleEl) titleEl.textContent = ((m && m.name) || '') + (isMovie ? '' : ' — ' + ep.name);
+  const seekFillEl   = document.getElementById('seek-fill');
+  const seekHandleEl = document.getElementById('seek-handle');
+  const timeEl        = document.getElementById('player-time');
+  if (seekFillEl)   seekFillEl.style.width  = '0%';
+  if (seekHandleEl) seekHandleEl.style.left = '0%';
+  if (timeEl) timeEl.textContent = '0:00 / 0:00';
+  setPlayPauseIcon(true);
+  const nextEpBtn = document.getElementById('player-next-ep');
+  if (nextEpBtn) nextEpBtn.classList.toggle('hidden', epIdx >= eps.length - 1);
+  const endHintEl = document.getElementById('player-end-hint');
+  if (endHintEl) endHintEl.classList.add('hidden');
+  showBuffering(false);
+  state.playerZone         = 'controls';
+  state.playerControlIndex = 1;
+  renderPlayerFocus();
   showOverlayPersistent();
 
   startPlayback(url, resumeTime);
+}
+
+function showBuffering(show) {
+  const el = document.getElementById('player-buffering');
+  if (el) el.classList.toggle('hidden', !show);
+}
+
+function showEndOfContent() {
+  showOverlayPersistent();
+  const endHintEl = document.getElementById('player-end-hint');
+  if (endHintEl) endHintEl.classList.remove('hidden');
+}
+
+function handleVideoEnded() {
+  const eps  = currentEps();
+  const next = state.currentEpIdx + 1;
+  if (next < eps.length) playNext();
+  else showEndOfContent();
+}
+
+function setPlayPauseIcon(isPlaying) {
+  const btn = document.getElementById('player-playpause');
+  if (btn) btn.innerHTML = isPlaying ? '&#10074;&#10074;' : '&#9654;';
+}
+
+function togglePlayPause(video) {
+  if (!video) return;
+  if (video.paused) { video.play().catch(function() {}); setPlayPauseIcon(true); }
+  else { video.pause(); setPlayPauseIcon(false); }
+}
+
+function getPlayerControlIds() {
+  const ids = ['player-rew', 'player-playpause', 'player-ff', 'player-settings'];
+  const nextBtn = document.getElementById('player-next-ep');
+  if (nextBtn && !nextBtn.classList.contains('hidden')) ids.push('player-next-ep');
+  return ids;
+}
+
+function movePlayerControlFocus(delta) {
+  const ids = getPlayerControlIds();
+  const max = ids.length - 1;
+  state.playerControlIndex = Math.max(0, Math.min(max, state.playerControlIndex + delta));
+  renderPlayerFocus();
+}
+
+function activateFocusedPlayerControl(video) {
+  const ids = getPlayerControlIds();
+  const id  = ids[state.playerControlIndex];
+  if (id === 'player-rew') {
+    if (video) { video.currentTime = Math.max(0, video.currentTime - 10); updatePlayerBar(); }
+  } else if (id === 'player-playpause') {
+    togglePlayPause(video);
+  } else if (id === 'player-ff') {
+    if (video) { video.currentTime += 10; updatePlayerBar(); }
+  } else if (id === 'player-settings') {
+    openPlayerSettings();
+  } else if (id === 'player-next-ep') {
+    playNext();
+  }
+}
+
+function renderPlayerFocus() {
+  const seekBarEl = document.querySelector('.seek-bar');
+  if (seekBarEl) seekBarEl.classList.toggle('focused', state.playerZone === 'seek');
+
+  ['player-rew', 'player-playpause', 'player-ff', 'player-settings', 'player-next-ep'].forEach(function(id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('focused');
+  });
+  if (state.playerZone === 'controls') {
+    const ids = getPlayerControlIds();
+    const activeId = ids[state.playerControlIndex];
+    const el = activeId && document.getElementById(activeId);
+    if (el) el.classList.add('focused');
+  }
+}
+
+function openPlayerSettings() {
+  const idx = BUFFER_LEVEL_ORDER.indexOf(getBufferLevel());
+  state.playerSettingsFocus = idx >= 0 ? idx : 1;
+  state.playerSettingsOpen  = true;
+  renderPlayerSettings();
+}
+
+function closePlayerSettings() {
+  state.playerSettingsOpen = false;
+  const overlay = document.getElementById('player-settings-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
+function renderPlayerSettings() {
+  const overlay = document.getElementById('player-settings-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('hidden');
+  const current = getBufferLevel();
+  overlay.innerHTML =
+    '<div class="settings-box">' +
+      '<div class="settings-title">Bộ đệm (Buffer)</div>' +
+      BUFFER_LEVEL_ORDER.map(function(level, i) {
+        const preset = BUFFER_PRESETS[level];
+        return '<div class="settings-option' +
+          (i === state.playerSettingsFocus ? ' focused' : '') +
+          (level === current ? ' active' : '') + '">' +
+          '<span>' + escHtml(preset.label) + '</span>' +
+          '<span class="settings-option-check">&#10003;</span>' +
+          '</div>';
+      }).join('') +
+    '</div>';
+}
+
+function handlePlayerSettings(k) {
+  if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) {
+    closePlayerSettings();
+    return true;
+  }
+  if (k === KEY.UP) {
+    state.playerSettingsFocus = Math.max(0, state.playerSettingsFocus - 1);
+    renderPlayerSettings();
+    return true;
+  }
+  if (k === KEY.DOWN) {
+    state.playerSettingsFocus = Math.min(BUFFER_LEVEL_ORDER.length - 1, state.playerSettingsFocus + 1);
+    renderPlayerSettings();
+    return true;
+  }
+  if (k === KEY.ENTER) {
+    const level = BUFFER_LEVEL_ORDER[state.playerSettingsFocus];
+    if (level) applyBufferLevelLive(level);
+    closePlayerSettings();
+    return true;
+  }
+  return false;
+}
+
+const MEDIA_ERROR_LABELS = {
+  1: 'MEDIA_ERR_ABORTED (bị hủy)',
+  2: 'MEDIA_ERR_NETWORK (lỗi mạng)',
+  3: 'MEDIA_ERR_DECODE (lỗi giải mã)',
+  4: 'MEDIA_ERR_SRC_NOT_SUPPORTED (định dạng/nguồn không hỗ trợ)',
+};
+
+function showPlayerError(msg) {
+  const el = document.getElementById('player-error');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  console.error('[TizenPhim player]', msg);
+}
+
+function hidePlayerError() {
+  const el = document.getElementById('player-error');
+  if (el) el.classList.add('hidden');
 }
 
 function startPlayback(url, resumeTime) {
@@ -885,35 +1718,70 @@ function startPlayback(url, resumeTime) {
   if (!video) return;
 
   if (_hls) { _hls.destroy(); _hls = null; }
+  state.currentStreamUrl = url;
+  hidePlayerError();
 
   video.ontimeupdate = updatePlayerBar;
-  video.onended      = playNext;
+  video.onended      = handleVideoEnded;
   video.onloadedmetadata = function() {
     if (resumeTime && resumeTime > 5 && video.duration && resumeTime < video.duration - 2) {
       try { video.currentTime = resumeTime; } catch (_) {}
     }
   };
+  video.onwaiting = function() { showBuffering(true); };
+  video.onplaying = function() { showBuffering(false); hidePlayerError(); };
+  video.oncanplay = function() { showBuffering(false); };
+  video.onerror   = function() {
+    const code = video.error && video.error.code;
+    showPlayerError('Không phát được video (' + (MEDIA_ERROR_LABELS[code] || 'lỗi không rõ #' + code) + ')');
+  };
 
+  const preset = BUFFER_PRESETS[getBufferLevel()] || BUFFER_PRESETS.normal;
+
+  function attemptPlay() {
+    video.play().catch(function(err) {
+      showPlayerError('Không thể tự phát: ' + (err && err.message ? err.message : String(err)));
+    });
+  }
+
+  // These streams' manifests are full of #EXT-X-DISCONTINUITY (spliced/re-encoded
+  // segments), which native HLS decoders (Safari/AVFoundation, Tizen's AVPlay)
+  // reject outright even when canPlayType() claims support. hls.js's software
+  // remuxer tolerates it, so it's used everywhere — not just on Tizen.
   if (window.Hls && window.Hls.isSupported()) {
     _hls = new window.Hls({
-      maxBufferLength: 60,
-      maxMaxBufferLength: 120,
-      maxBufferSize: 90 * 1000 * 1000,
-      fragLoadingMaxRetry: 8,
+      maxBufferLength: preset.maxBufferLength,
+      maxMaxBufferLength: preset.maxMaxBufferLength,
+      maxBufferSize: preset.maxBufferSize,
+      fragLoadingMaxRetry: preset.fragLoadingMaxRetry,
       fragLoadingRetryDelay: 1000,
-      manifestLoadingMaxRetry: 6,
-      levelLoadingMaxRetry: 6,
+      manifestLoadingMaxRetry: preset.manifestLoadingMaxRetry,
+      levelLoadingMaxRetry: preset.levelLoadingMaxRetry,
     });
     _hls.loadSource(url);
     _hls.attachMedia(video);
-    _hls.on(window.Hls.Events.MANIFEST_PARSED, function() {
-      video.play().catch(function() {});
+    _hls.on(window.Hls.Events.MANIFEST_PARSED, attemptPlay);
+    _hls.on(window.Hls.Events.ERROR, function(_evt, data) {
+      if (!data || !data.fatal) return;
+      showPlayerError('Lỗi phát HLS (' + data.type + '): ' + (data.details || 'không rõ'));
     });
   } else {
     video.src = url;
-    video.play().catch(function() {});
+    attemptPlay();
   }
   showOverlay();
+}
+
+function applyBufferLevelLive(level) {
+  setBufferLevel(level);
+  const video = document.getElementById('video');
+  if (!video || !_hls || !state.currentStreamUrl) return;
+  const resumeAt = video.currentTime || 0;
+  const wasPaused = video.paused;
+  startPlayback(state.currentStreamUrl, resumeAt);
+  if (wasPaused) {
+    setTimeout(function() { const v = document.getElementById('video'); if (v) { v.pause(); setPlayPauseIcon(false); } }, 300);
+  }
 }
 
 function stopPlayback() {
@@ -923,8 +1791,11 @@ function stopPlayback() {
       saveHistory(state.currentSlug, { epIdx: state.currentEpIdx, time: video.currentTime, duration: video.duration });
     }
     video.src = ''; video.ontimeupdate = null; video.onended = null; video.onloadedmetadata = null;
+    video.onwaiting = null; video.onplaying = null; video.oncanplay = null;
   }
   if (_hls) { _hls.destroy(); _hls = null; }
+  showBuffering(false);
+  closePlayerSettings();
   clearTimeout(state.overlayTimer);
 }
 
@@ -938,8 +1809,13 @@ function updatePlayerBar() {
   const video = document.getElementById('video');
   if (!video || !video.duration) return;
   const fmt = function(t) { return Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0'); };
-  document.getElementById('player-time').textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration);
-  document.getElementById('seek-fill').style.width   = ((video.currentTime / video.duration) * 100) + '%';
+  const pct = (video.currentTime / video.duration) * 100;
+  const timeEl       = document.getElementById('player-time');
+  const seekFillEl   = document.getElementById('seek-fill');
+  const seekHandleEl = document.getElementById('seek-handle');
+  if (timeEl)       timeEl.textContent   = fmt(video.currentTime) + ' / ' + fmt(video.duration);
+  if (seekFillEl)   seekFillEl.style.width  = pct + '%';
+  if (seekHandleEl) seekHandleEl.style.left = pct + '%';
   const now = Date.now();
   if (now - _lastProgressSave > 5000) {
     _lastProgressSave = now;
@@ -973,15 +1849,47 @@ function handlePlayer(k) {
 
   showOverlay();
 
-  if (k === KEY.ENTER || k === KEY.PLAY || k === KEY.PAUSE || k === KEY.PLAYPAUSE) {
-    if (video) video.paused ? video.play().catch(function() {}) : video.pause();
-  } else if (k === KEY.RIGHT || k === KEY.FF) {
-    if (video) video.currentTime += 10;
-  } else if (k === KEY.LEFT || k === KEY.REW) {
-    if (video) video.currentTime = Math.max(0, video.currentTime - 10);
-  } else { return false; }
+  // Dedicated hardware transport buttons always work, regardless of focus zone.
+  if (k === KEY.PLAY || k === KEY.PAUSE || k === KEY.PLAYPAUSE) {
+    togglePlayPause(video);
+    return true;
+  }
+  if (k === KEY.FF) {
+    if (video) { video.currentTime += 10; updatePlayerBar(); }
+    return true;
+  }
+  if (k === KEY.REW) {
+    if (video) { video.currentTime = Math.max(0, video.currentTime - 10); updatePlayerBar(); }
+    return true;
+  }
 
-  return true;
+  const inSeekZone = state.playerZone === 'seek';
+
+  if (k === KEY.LEFT) {
+    if (inSeekZone) { if (video) { video.currentTime = Math.max(0, video.currentTime - 10); updatePlayerBar(); } }
+    else movePlayerControlFocus(-1);
+    return true;
+  }
+  if (k === KEY.RIGHT) {
+    if (inSeekZone) { if (video) { video.currentTime += 10; updatePlayerBar(); } }
+    else movePlayerControlFocus(1);
+    return true;
+  }
+  if (k === KEY.UP) {
+    if (!inSeekZone) { state.playerZone = 'seek'; renderPlayerFocus(); }
+    return true;
+  }
+  if (k === KEY.DOWN) {
+    if (inSeekZone) { state.playerZone = 'controls'; renderPlayerFocus(); }
+    return true;
+  }
+  if (k === KEY.ENTER) {
+    if (inSeekZone) togglePlayPause(video);
+    else activateFocusedPlayerControl(video);
+    return true;
+  }
+
+  return false;
 }
 
 // ── Watch history ─────────────────────────────────────────────────────────────
