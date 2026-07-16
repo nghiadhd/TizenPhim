@@ -148,6 +148,7 @@ const state = {
   hero:              { item: null, loading: false, zone: 'play' },
   homeRowZone:       'hero',
   homeSidebarFocus:  0,
+  homeSidebarReturnZone: 'hero', // zone to restore when leaving the sidebar — 'hero' or 'row'
   rows:              [],
   rowFocusIndex:     0,
 
@@ -155,6 +156,7 @@ const state = {
   catGrid: {
     catId: null, catName: '',
     items: [], page: 1, hasMore: false, loading: false, loadingMore: false, focus: 0,
+    heroItem: null,
   },
 
   playerZone:          'controls',
@@ -337,6 +339,48 @@ function handleConfirmDialog(k) {
   return true;
 }
 
+// Position a to-be-inserted local row so state.rows stays in the same order
+// buildHomeRows() would have produced, by counting how many earlier CATALOGS
+// entries already have a row present.
+function homeRowInsertIndex(catId) {
+  const targetIdx = CATALOGS.findIndex(function(c) { return c.id === catId; });
+  let insertAt = 0;
+  for (let i = 0; i < targetIdx; i++) {
+    const c = CATALOGS[i];
+    if (c.id === 'search') continue;
+    if (state.rows.some(function(r) { return r.catId === c.id; })) insertAt++;
+  }
+  return insertAt;
+}
+
+// Shared by favorite/continue-watching add, remove, and update paths: refreshes an
+// existing local row in place, or creates+inserts it (buildHomeRows() skipped it at
+// startup because the list was empty then) if it's missing but now has items.
+function syncLocalRow(catId) {
+  if (!LOCAL_BUILDERS[catId]) return;
+  const items = LOCAL_BUILDERS[catId]();
+  const row = state.rows.find(function(r) { return r.catId === catId; });
+
+  if (row) {
+    row.items = items;
+    if (row.focus > row.items.length - 1) row.focus = Math.max(0, row.items.length - 1);
+    renderHomeRow(row);
+  } else if (items.length) {
+    const cat = CATALOGS.find(function(c) { return c.id === catId; });
+    if (!cat) return;
+    const insertAt = homeRowInsertIndex(catId);
+    state.rows.splice(insertAt, 0, {
+      catId: cat.id, catName: cat.name, isLocal: true, items: items,
+      loading: false, loaded: true, focus: 0, page: 1, hasMore: false,
+    });
+    // Inserting shifts every row's index (data-row-index / #home-row-track-N),
+    // so state.rowFocusIndex must be adjusted to keep pointing at the same row.
+    if (state.rowFocusIndex >= insertAt) state.rowFocusIndex++;
+    renderHomeRows();
+  }
+  renderHomeSidebar();
+}
+
 function removeFromLocalList(catId, slug) {
   try {
     const key   = catId === 'favorite' ? 'tizenphim_favorites' : 'tizenphim_watchHistory';
@@ -355,13 +399,7 @@ function removeFromLocalList(catId, slug) {
     renderCategoryGrid();
     renderHomeScreen();
   }
-  const row = state.rows.find(function(r) { return r.catId === catId; });
-  if (row && LOCAL_BUILDERS[catId]) {
-    row.items = LOCAL_BUILDERS[catId]();
-    if (row.focus > row.items.length - 1) row.focus = Math.max(0, row.items.length - 1);
-    renderHomeRow(row);
-    renderHomeSidebar();
-  }
+  syncLocalRow(catId);
 }
 
 function onKey(e) {
@@ -418,12 +456,21 @@ async function loadHomeHero() {
 function getDisplayedHeroItem() {
   if (state.homeMode === 'category') {
     const g = state.catGrid;
-    if (state.homeRowZone === 'grid' && g.items[g.focus]) return g.items[g.focus];
-    return g.items[0] || null;
+    if (state.homeRowZone === 'grid' && g.items[g.focus]) {
+      // Sticks so that jumping back to hero (BACK / UP-at-top) keeps showing
+      // whatever card was last focused, instead of resetting to items[0].
+      g.heroItem = g.items[g.focus];
+    }
+    return g.heroItem || g.items[0] || null;
   }
   if (state.homeRowZone === 'row') {
     const row = state.rows[state.rowFocusIndex];
-    if (row && row.loaded && row.items[row.focus]) return row.items[row.focus];
+    if (row && row.loaded && row.items[row.focus]) {
+      // Same stickiness for rows mode: keep the last-hovered row item as the
+      // hero content once focus moves away from the row, so Play/Info act on
+      // the film the user was actually looking at.
+      state.hero.item = row.items[row.focus];
+    }
   }
   return state.hero.item;
 }
@@ -509,7 +556,10 @@ function renderHomeScreen() {
 }
 
 function handleHomeScreen(k) {
-  if ((k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) && state.homeMode === 'category') {
+  // BACK steps back one level at a time within a category page: from the grid it
+  // jumps to that page's own hero first (handled in handleHomeCategoryGridKey);
+  // only pressing BACK again once already at the hero exits the category page.
+  if ((k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) && state.homeMode === 'category' && state.homeRowZone === 'hero') {
     exitCategoryGrid();
     return true;
   }
@@ -519,10 +569,29 @@ function handleHomeScreen(k) {
   return handleHomeRowKey(k);
 }
 
+// Restores whichever zone the user was in before entering the sidebar (hero or a
+// specific row+card), instead of always dumping them back on the hero banner —
+// used when backing out of the sidebar via RIGHT or the Trang Chủ button.
+function leaveSidebarZone() {
+  const i   = state.rowFocusIndex;
+  const row = state.rows[i];
+  if (state.homeSidebarReturnZone === 'row' && row && row.loaded) {
+    state.homeRowZone = 'row';
+    renderHomeScreen();
+    updateHomeRowShellFocus(i);
+    updateHomeRowCardFocus(null, i, true);
+    scrollHomeRowIntoView(i);
+  } else {
+    state.homeRowZone = 'hero';
+    renderHomeScreen();
+  }
+}
+
 function handleHomeSidebarKey(k) {
   const ids = getHomeSidebarIds();
   if (k === KEY.RIGHT) {
-    state.homeRowZone = 'hero';
+    leaveSidebarZone();
+    return true;
   } else if (k === KEY.UP) {
     state.homeSidebarFocus = Math.max(0, state.homeSidebarFocus - 1);
   } else if (k === KEY.DOWN) {
@@ -537,11 +606,11 @@ function handleHomeSidebarKey(k) {
 
 function activateHomeSidebarIcon(id) {
   if (id === 'home-nav-home') {
+    // Only exits category-grid mode (if in one) — deliberately does NOT scroll to
+    // top or reset focus to hero, so it doesn't disturb whatever row/card the user
+    // already had selected.
     state.homeMode = 'rows';
-    const scrollEl = document.getElementById('home-scroll');
-    if (scrollEl) scrollEl.scrollTo({ top: 0, behavior: 'smooth' });
-    state.homeRowZone = 'hero';
-    renderHomeScreen();
+    leaveSidebarZone();
   } else if (id === 'home-search-btn') {
     showSearch();
   } else if (id === 'home-nav-continue') {
@@ -563,6 +632,7 @@ function openCategoryGrid(catId) {
   state.catGrid = {
     catId: cat.id, catName: cat.name,
     items: [], page: 1, hasMore: false, loading: true, loadingMore: false, focus: 0,
+    heroItem: null,
   };
   const scrollEl = document.getElementById('home-scroll');
   if (scrollEl) scrollEl.scrollTo({ top: 0 });
@@ -699,6 +769,13 @@ function handleHomeCategoryGridKey(k) {
     const item = items[g.focus];
     if (item) { state.prevScreen = 'home'; showDetail(item.slug); }
     return true;
+  } else if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) {
+    // Quick jump to this category page's own hero from any grid depth — mirrors
+    // the row-list version. handleHomeScreen only exits the category page on a
+    // second BACK once already at the hero, so this doesn't skip a level.
+    state.homeRowZone = 'hero';
+    renderHomeScreen();
+    return true;
   } else { return false; }
 
   if (focusOnly) {
@@ -713,9 +790,10 @@ function handleHomeHeroKey(k) {
     state.hero.zone = 'info';
   } else if (k === KEY.LEFT) {
     if (state.hero.zone === 'info') { state.hero.zone = 'play'; }
-    else { state.homeRowZone = 'sidebar'; }
+    else { state.homeRowZone = 'sidebar'; state.homeSidebarReturnZone = 'hero'; }
   } else if (k === KEY.UP) {
     state.homeRowZone = 'sidebar';
+    state.homeSidebarReturnZone = 'hero';
   } else if (k === KEY.DOWN) {
     if (state.homeMode === 'category') {
       if (!state.catGrid.items.length) return false;
@@ -746,7 +824,8 @@ function handleHomeRowKey(k) {
   if (k === KEY.UP) {
     if (i === 0) {
       state.homeRowZone = 'hero';
-      updateHomeRowFocusVisuals(i);
+      updateHomeRowShellFocus(i);
+      updateHomeRowCardFocus(i, null, false);
       renderHomeScreen();
     } else {
       moveHomeRowFocus(i - 1);
@@ -761,12 +840,15 @@ function handleHomeRowKey(k) {
   if (k === KEY.LEFT) {
     if (!row.loaded || row.focus <= 0) {
       state.homeRowZone = 'sidebar';
-      updateHomeRowFocusVisuals(i);
+      state.homeSidebarReturnZone = 'row';
+      updateHomeRowShellFocus(i);
+      updateHomeRowCardFocus(i, null, false);
       renderHomeScreen();
       return true;
     }
+    const oldFocus = row.focus;
     row.focus--;
-    renderHomeRowTrack(row, i);
+    updateGridFocus(document.getElementById('home-row-track-' + i), oldFocus, row.focus, true);
     renderHomeScreen();
     return true;
   }
@@ -774,8 +856,9 @@ function handleHomeRowKey(k) {
     if (!row.loaded) return false;
     const maxFocus = row.items.length - 1 + (row.hasMore ? 1 : 0);
     if (row.focus >= maxFocus) return false;
+    const oldFocus = row.focus;
     row.focus++;
-    renderHomeRowTrack(row, i);
+    updateGridFocus(document.getElementById('home-row-track-' + i), oldFocus, row.focus, true);
     renderHomeScreen();
     return true;
   }
@@ -786,6 +869,15 @@ function handleHomeRowKey(k) {
     if (item) { state.prevScreen = 'home'; showDetail(item.slug); }
     return true;
   }
+  if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) {
+    // Quick jump to the hero from any row depth — the hero is already always
+    // visible (sticky), so this is purely a focus move, no scrolling involved.
+    state.homeRowZone = 'hero';
+    updateHomeRowShellFocus(i);
+    updateHomeRowCardFocus(i, null, false);
+    renderHomeScreen();
+    return true;
+  }
   return false;
 }
 
@@ -794,7 +886,8 @@ function enterHomeRowZone(index) {
   state.rowFocusIndex = index;
   ensureRowLoaded(state.rows[index]);
   renderHomeScreen();
-  updateHomeRowFocusVisuals(index);
+  updateHomeRowShellFocus(index);
+  updateHomeRowCardFocus(null, index, true);
   scrollHomeRowIntoView(index);
 }
 
@@ -802,18 +895,46 @@ function moveHomeRowFocus(newIndex) {
   const oldIndex = state.rowFocusIndex;
   state.rowFocusIndex = newIndex;
   ensureRowLoaded(state.rows[newIndex]);
-  updateHomeRowFocusVisuals(oldIndex);
-  updateHomeRowFocusVisuals(newIndex);
+  updateHomeRowShellFocus(oldIndex);
+  updateHomeRowShellFocus(newIndex);
+  updateHomeRowCardFocus(oldIndex, newIndex, true);
   renderHomeScreen();
   scrollHomeRowIntoView(newIndex);
 }
 
-function updateHomeRowFocusVisuals(i) {
-  const row = state.rows[i];
-  if (!row) return;
+function updateHomeRowShellFocus(i) {
   const shellEl = document.querySelector('.home-row[data-row-index="' + i + '"]');
   if (shellEl) shellEl.classList.toggle('focused', state.homeRowZone === 'row' && state.rowFocusIndex === i);
-  renderHomeRowTrack(row, i);
+}
+
+// Row-aware wrapper around the updateGridFocus pattern: updateGridFocus itself only
+// handles a single container, but moving focus between rows means blurring a card in
+// one row's track and focusing a card in a *different* row's track. Pass null for
+// either side when there's nothing to blur/focus on that side (e.g. entering/leaving
+// row zone entirely).
+function updateHomeRowCardFocus(oldRowIndex, newRowIndex, marquee) {
+  if (oldRowIndex != null) {
+    const oldRow = state.rows[oldRowIndex];
+    if (oldRow && oldRow.loaded) {
+      const oldTrack = document.getElementById('home-row-track-' + oldRowIndex);
+      const oldCard  = oldTrack && oldTrack.children[oldRow.focus];
+      if (oldCard) { oldCard.classList.remove('focused'); stopCardMarquee(oldCard); }
+    }
+  }
+  if (newRowIndex != null) {
+    const newRow = state.rows[newRowIndex];
+    if (newRow && newRow.loaded) {
+      const newTrack = document.getElementById('home-row-track-' + newRowIndex);
+      const newCard  = newTrack && newTrack.children[newRow.focus];
+      if (newCard) {
+        newCard.classList.add('focused');
+        requestAnimationFrame(function() {
+          newCard.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+          if (marquee) marqueeTitle(newCard);
+        });
+      }
+    }
+  }
 }
 
 function scrollHomeRowIntoView(i) {
@@ -1022,17 +1143,34 @@ function marqueeTitle(card) {
   const shift  = pieces[1].offsetLeft - pieces[0].offsetLeft;
   if (shift <= 2) return;
   const dur = Math.max(9000, shift * 70);
+  // Fixed 2s pause before scrolling starts, regardless of title length/duration
+  // (a flat offset fraction like 0.35 would stretch the pause out on long titles).
+  const startOffset = 2000 / dur;
   scroll.animate([
-    { transform: 'translateX(0)',            offset: 0    },
-    { transform: 'translateX(0)',            offset: 0.35 },
+    { transform: 'translateX(0)',            offset: 0 },
+    { transform: 'translateX(0)',            offset: startOffset },
     { transform: 'translateX(' + (-shift) + 'px)', offset: 0.85 },
     { transform: 'translateX(' + (-shift) + 'px)', offset: 1    },
   ], { duration: dur, iterations: Infinity, easing: 'linear' });
 }
 
+function stopCardMarquee(card) {
+  const title  = card && card.querySelector('.card-title');
+  const scroll = title && title.querySelector('.card-title-scroll');
+  if (!scroll) return;
+  const piece = scroll.querySelector('.cts-piece');
+  // Collapsing back to plain text discards the animated node (and with it
+  // the running Web Animation), instead of leaving it playing forever on a
+  // card that's no longer focused.
+  title.innerHTML = piece ? piece.innerHTML : title.textContent;
+}
+
 function updateGridFocus(containerEl, oldIndex, newIndex, marquee) {
   const cards = containerEl.children;
-  if (cards[oldIndex]) cards[oldIndex].classList.remove('focused');
+  if (cards[oldIndex]) {
+    cards[oldIndex].classList.remove('focused');
+    stopCardMarquee(cards[oldIndex]);
+  }
   const nc = cards[newIndex];
   if (nc) {
     nc.classList.add('focused');
@@ -1276,7 +1414,12 @@ function handleSearch(k) {
       renderSearch();
       return true;
     }
-    if (k === KEY.BACK || k === KEY.ESC || k === KEY.BACKSPACE) { showHome(); return true; }
+    if (k === KEY.BACK || k === KEY.ESC) { showHome(); return true; }
+    // Backspace on a real keyboard (or an IME composing tone marks, which can send a
+    // transient Backspace mid-word) must delete text, not exit — only treat it as the
+    // TV remote's Back signal once the field is already empty, so a further press has
+    // nothing left to delete.
+    if (k === KEY.BACKSPACE && !state.search.query) { showHome(); return true; }
     return false;
   }
 
@@ -1789,6 +1932,7 @@ function stopPlayback() {
   if (video) {
     if (video.duration && state.currentSlug) {
       saveHistory(state.currentSlug, { epIdx: state.currentEpIdx, time: video.currentTime, duration: video.duration });
+      syncLocalRow('continue');
     }
     video.src = ''; video.ontimeupdate = null; video.onended = null; video.onloadedmetadata = null;
     video.onwaiting = null; video.onplaying = null; video.oncanplay = null;
@@ -1931,9 +2075,15 @@ function toggleFavorite(slug, name, poster) {
   if (!slug) return false;
   try {
     const f = getFavorites();
-    if (f[slug]) { delete f[slug]; localStorage.setItem('tizenphim_favorites', JSON.stringify(f)); return false; }
+    if (f[slug]) {
+      delete f[slug];
+      localStorage.setItem('tizenphim_favorites', JSON.stringify(f));
+      syncLocalRow('favorite');
+      return false;
+    }
     f[slug] = { slug: slug, name: name, poster: poster, ts: Date.now() };
     localStorage.setItem('tizenphim_favorites', JSON.stringify(f));
+    syncLocalRow('favorite');
     return true;
   } catch (_) { return false; }
 }
