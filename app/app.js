@@ -1730,10 +1730,8 @@ function setPlayPauseIcon(isPlaying) {
   if (btn) btn.innerHTML = isPlaying ? '&#10074;&#10074;' : '&#9654;';
 }
 
-function togglePlayPause(video) {
-  if (!video) return;
-  if (video.paused) { video.play().catch(function() {}); setPlayPauseIcon(true); }
-  else { video.pause(); setPlayPauseIcon(false); }
+function togglePlayPause() {
+  mediaToggle();
 }
 
 function getPlayerControlIds() {
@@ -1754,11 +1752,11 @@ function activateFocusedPlayerControl(video) {
   const ids = getPlayerControlIds();
   const id  = ids[state.playerControlIndex];
   if (id === 'player-rew') {
-    if (video) { video.currentTime = Math.max(0, video.currentTime - 10); updatePlayerBar(); }
+    mediaSeekBy(-10);
   } else if (id === 'player-playpause') {
-    togglePlayPause(video);
+    togglePlayPause();
   } else if (id === 'player-ff') {
-    if (video) { video.currentTime += 10; updatePlayerBar(); }
+    mediaSeekBy(10);
   } else if (id === 'player-settings') {
     openPlayerSettings();
   } else if (id === 'player-next-ep') {
@@ -1859,9 +1857,114 @@ function hidePlayerError() {
   if (el) el.classList.add('hidden');
 }
 
+// ── Media backend: native AVPlay on the TV, HTML5 + hls.js everywhere else ────
+// AVPlay hands the whole HLS stream to the TV's hardware pipeline (no JS remux
+// of MPEG-TS, no JS-heap buffer growth), so it stays smooth on long movies. If
+// AVPlay errors on a stream (e.g. rejects #EXT-X-DISCONTINUITY), we fall back to
+// the hls.js path automatically, once per playback session.
+const AVPLAY = (typeof window !== 'undefined' && window.webapis && window.webapis.avplay) ? window.webapis.avplay : null;
+let _mediaBackend = null;   // 'avplay' | 'html5'
+let _avDuration = 0;        // seconds
+let _avFellBack = false;
+
+function showAvSurface(on) {
+  const obj = document.getElementById('av-player');
+  if (obj) obj.classList.toggle('hidden', !on);
+  document.body.classList.toggle('avplay-active', !!on);
+}
+
+function mediaTimeSec() {
+  if (_mediaBackend === 'avplay') { try { return (AVPLAY.getCurrentTime() || 0) / 1000; } catch (_) { return 0; } }
+  const v = document.getElementById('video'); return v ? (v.currentTime || 0) : 0;
+}
+function mediaDurationSec() {
+  if (_mediaBackend === 'avplay') return _avDuration || 0;
+  const v = document.getElementById('video'); return (v && v.duration) ? v.duration : 0;
+}
+function mediaPaused() {
+  if (_mediaBackend === 'avplay') { try { return AVPLAY.getState() === 'PAUSED'; } catch (_) { return false; } }
+  const v = document.getElementById('video'); return v ? v.paused : true;
+}
+function mediaPlay() {
+  if (_mediaBackend === 'avplay') { try { AVPLAY.play(); } catch (_) {} setPlayPauseIcon(true); return; }
+  const v = document.getElementById('video'); if (v) v.play().catch(function () {}); setPlayPauseIcon(true);
+}
+function mediaPause() {
+  if (_mediaBackend === 'avplay') { try { AVPLAY.pause(); } catch (_) {} setPlayPauseIcon(false); return; }
+  const v = document.getElementById('video'); if (v) v.pause(); setPlayPauseIcon(false);
+}
+function mediaToggle() { if (mediaPaused()) mediaPlay(); else mediaPause(); }
+function mediaSeekBy(sec) {
+  if (_mediaBackend === 'avplay') {
+    try { if (sec >= 0) AVPLAY.jumpForward(Math.round(sec * 1000)); else AVPLAY.jumpBackward(Math.round(-sec * 1000)); } catch (_) {}
+    updatePlayerBar(); return;
+  }
+  const v = document.getElementById('video');
+  if (v) { v.currentTime = Math.max(0, (v.currentTime || 0) + sec); updatePlayerBar(); }
+}
+
+function avCleanup() {
+  try { AVPLAY.stop(); } catch (_) {}
+  try { AVPLAY.close(); } catch (_) {}
+}
+
+function avFail(url, resumeTime, why) {
+  if (_avFellBack) { showPlayerError('Lỗi phát (AVPlay): ' + why); return; }
+  _avFellBack = true;
+  let at = resumeTime || 0;
+  try { const t = (AVPLAY.getCurrentTime() || 0) / 1000; if (t > 1) at = t; } catch (_) {}
+  avCleanup();
+  showAvSurface(false);
+  startPlaybackHtml5(url, at);
+}
+
+function startPlaybackAV(url, resumeTime) {
+  try {
+    _mediaBackend = null;
+    showAvSurface(true);
+    AVPLAY.open(url);
+    AVPLAY.setDisplayRect(0, 0, 1920, 1080);
+    try { AVPLAY.setStreamingProperty('ADAPTIVE_INFO', 'STARTBITRATE=HIGHEST|SKIPBITRATE=LOWEST'); } catch (_) {}
+    AVPLAY.setListener({
+      onbufferingstart:     function () { showBuffering(true); },
+      onbufferingprogress:  function () {},
+      onbufferingcomplete:  function () { showBuffering(false); },
+      oncurrentplaytime:    function () { updatePlayerBar(); },
+      onstreamcompleted:    function () { showBuffering(false); handleVideoEnded(); },
+      onevent:              function () {},
+      onerror:              function (e) { avFail(url, resumeTime, String(e)); },
+      onerrormsg:           function (e, msg) { avFail(url, resumeTime, msg || String(e)); },
+      onresourceconflicted: function () { avFail(url, resumeTime, 'resource conflicted'); },
+    });
+    AVPLAY.prepareAsync(function () {
+      _mediaBackend = 'avplay';
+      try { _avDuration = (AVPLAY.getDuration() || 0) / 1000; } catch (_) { _avDuration = 0; }
+      if (resumeTime && resumeTime > 5) { try { AVPLAY.seekTo(Math.round(resumeTime * 1000)); } catch (_) {} }
+      try { AVPLAY.play(); } catch (_) {}
+      setPlayPauseIcon(true);
+      showBuffering(false);
+    }, function (err) { avFail(url, resumeTime, 'prepare: ' + err); });
+  } catch (e) {
+    avFail(url, resumeTime, 'open: ' + (e && e.message ? e.message : String(e)));
+  }
+}
+
 function startPlayback(url, resumeTime) {
+  clearTimeout(_stallTimer);
+  state.currentStreamUrl = url;
+  hidePlayerError();
+  _mediaBackend = null;
+  _avFellBack = false;
+  _avDuration = 0;
+  if (AVPLAY) startPlaybackAV(url, resumeTime);
+  else startPlaybackHtml5(url, resumeTime);
+}
+
+function startPlaybackHtml5(url, resumeTime) {
   const video = document.getElementById('video');
   if (!video) return;
+  _mediaBackend = 'html5';
+  showAvSurface(false);
 
   if (_hls) { _hls.destroy(); _hls = null; }
   state.currentStreamUrl = url;
@@ -1940,7 +2043,7 @@ function applyBufferLevelLive(level) {
   if (!video || !_hls || !state.currentStreamUrl) return;
   const resumeAt = video.currentTime || 0;
   const wasPaused = video.paused;
-  startPlayback(state.currentStreamUrl, resumeAt);
+  startPlaybackHtml5(state.currentStreamUrl, resumeAt);
   if (wasPaused) {
     setTimeout(function() { const v = document.getElementById('video'); if (v) { v.pause(); setPlayPauseIcon(false); } }, 300);
   }
@@ -1948,16 +2051,19 @@ function applyBufferLevelLive(level) {
 
 function stopPlayback() {
   clearTimeout(_stallTimer);
+  const dur = mediaDurationSec();
+  if (dur && state.currentSlug) {
+    saveHistory(state.currentSlug, { epIdx: state.currentEpIdx, time: mediaTimeSec(), duration: dur });
+    syncLocalRow('continue');
+  }
+  if (_mediaBackend === 'avplay') { avCleanup(); showAvSurface(false); }
   const video = document.getElementById('video');
   if (video) {
-    if (video.duration && state.currentSlug) {
-      saveHistory(state.currentSlug, { epIdx: state.currentEpIdx, time: video.currentTime, duration: video.duration });
-      syncLocalRow('continue');
-    }
     video.src = ''; video.ontimeupdate = null; video.onended = null; video.onloadedmetadata = null;
     video.onwaiting = null; video.onplaying = null; video.oncanplay = null; video.onseeked = null;
   }
   if (_hls) { _hls.destroy(); _hls = null; }
+  _mediaBackend = null;
   showBuffering(false);
   closePlayerSettings();
   clearTimeout(state.overlayTimer);
@@ -1970,25 +2076,25 @@ function playNext() {
 }
 
 function updatePlayerBar() {
-  const video = document.getElementById('video');
-  if (!video || !video.duration) return;
+  const cur = mediaTimeSec(), dur = mediaDurationSec();
+  if (!dur) return;
   const fmt = function(t) {
     t = Math.max(0, Math.floor(t));
     const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
     const mm = h ? String(m).padStart(2, '0') : String(m);
     return (h ? h + ':' : '') + mm + ':' + String(s).padStart(2, '0');
   };
-  const pct = (video.currentTime / video.duration) * 100;
+  const pct = (cur / dur) * 100;
   const timeEl       = document.getElementById('player-time');
   const seekFillEl   = document.getElementById('seek-fill');
   const seekHandleEl = document.getElementById('seek-handle');
-  if (timeEl)       timeEl.textContent   = fmt(video.currentTime) + ' / ' + fmt(video.duration);
+  if (timeEl)       timeEl.textContent   = fmt(cur) + ' / ' + fmt(dur);
   if (seekFillEl)   seekFillEl.style.width  = pct + '%';
   if (seekHandleEl) seekHandleEl.style.left = pct + '%';
   const now = Date.now();
   if (now - _lastProgressSave > 5000) {
     _lastProgressSave = now;
-    saveHistory(state.currentSlug, { epIdx: state.currentEpIdx, time: video.currentTime, duration: video.duration });
+    saveHistory(state.currentSlug, { epIdx: state.currentEpIdx, time: cur, duration: dur });
   }
 }
 
@@ -2020,27 +2126,27 @@ function handlePlayer(k) {
 
   // Dedicated hardware transport buttons always work, regardless of focus zone.
   if (k === KEY.PLAY || k === KEY.PAUSE || k === KEY.PLAYPAUSE) {
-    togglePlayPause(video);
+    togglePlayPause();
     return true;
   }
   if (k === KEY.FF) {
-    if (video) { video.currentTime += 10; updatePlayerBar(); }
+    mediaSeekBy(10);
     return true;
   }
   if (k === KEY.REW) {
-    if (video) { video.currentTime = Math.max(0, video.currentTime - 10); updatePlayerBar(); }
+    mediaSeekBy(-10);
     return true;
   }
 
   const inSeekZone = state.playerZone === 'seek';
 
   if (k === KEY.LEFT) {
-    if (inSeekZone) { if (video) { video.currentTime = Math.max(0, video.currentTime - 10); updatePlayerBar(); } }
+    if (inSeekZone) mediaSeekBy(-10);
     else movePlayerControlFocus(-1);
     return true;
   }
   if (k === KEY.RIGHT) {
-    if (inSeekZone) { if (video) { video.currentTime += 10; updatePlayerBar(); } }
+    if (inSeekZone) mediaSeekBy(10);
     else movePlayerControlFocus(1);
     return true;
   }
@@ -2053,7 +2159,7 @@ function handlePlayer(k) {
     return true;
   }
   if (k === KEY.ENTER) {
-    if (inSeekZone) togglePlayPause(video);
+    if (inSeekZone) togglePlayPause();
     else activateFocusedPlayerControl(video);
     return true;
   }

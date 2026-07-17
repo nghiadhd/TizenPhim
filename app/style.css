@@ -385,6 +385,14 @@ body {
 #screen-player.active { display: block; }
 #video { width: 100%; height: 100%; display: block; object-fit: contain; }
 
+/* Native AVPlay renders on a hardware plane behind the webview. Its <object>
+   placeholder fills the screen; when active we make the player background
+   transparent so the video plane shows through (controls stay on top). */
+#av-player { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+#av-player.hidden { display: none; }
+body.avplay-active #screen-player { background: transparent; }
+body.avplay-active #video { display: none; }
+
 #player-overlay {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; justify-content: space-between;
