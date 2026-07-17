@@ -393,6 +393,14 @@ body {
 body.avplay-active #screen-player { background: transparent; }
 body.avplay-active #video { display: none; }
 
+/* Always-visible network diagnostic (so an empty home still shows WHY). */
+#net-diag {
+  position: fixed; bottom: 0.6rem; left: 0.8rem; z-index: 90;
+  background: rgba(0,0,0,0.72); color: #7CFC00;
+  font: 600 1rem/1.4 monospace; padding: 0.35rem 0.7rem; border-radius: 0.35rem;
+  max-width: 70%; white-space: pre-wrap; pointer-events: none;
+}
+
 /* Full diagnostics panel (🐞 button). */
 .debug-box { background: rgba(0,0,0,0.94); border: 1px solid #555; border-radius: 0.6rem; padding: 1.6rem 2rem; max-width: 82%; }
 .debug-title { color: #7CFC00; font-weight: 700; font-size: 1.6rem; margin-bottom: 1rem; }

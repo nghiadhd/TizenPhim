@@ -202,6 +202,11 @@ async function startApp() {
   if (vEl) vEl.textContent = 'v' + VERSION;
   const sidebarVer = document.getElementById('sidebar-version');
   if (sidebarVer) sidebarVer.textContent = 'v' + VERSION;
+  // Live network diagnostic on every screen — so an empty home still shows why.
+  setInterval(function () {
+    const el = document.getElementById('net-diag');
+    if (el) el.textContent = 'phimmoie.fm · ' + _lastFetch;
+  }, 1000);
   showHome();
 }
 
