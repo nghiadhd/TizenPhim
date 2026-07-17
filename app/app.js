@@ -18,7 +18,11 @@ window.addEventListener('error', function(ev) {
 });
 window.addEventListener('unhandledrejection', function(ev) {
   var r = ev.reason;
-  _showError(r && r.message ? r.message : String(r), 'unhandledrejection');
+  var msg = r && r.message ? r.message : String(r);
+  // Network/fetch failures are handled gracefully (httpGet returns ''); don't let
+  // a stray one wipe the whole UI.
+  if (/Failed to fetch|NetworkError|Load failed|HTTP \d/i.test(msg)) { try { ev.preventDefault(); } catch (_) {} return; }
+  _showError(msg, 'unhandledrejection');
 });
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -213,16 +217,19 @@ function registerTizenKeys() {
 // stale response. _lastFetch is surfaced in the 🐞 Bug panel so you can see on the
 // TV whether the fetch succeeded or was CORS/anti-bot blocked.
 let _lastFetch = '(chưa fetch)';
+// NEVER throws — a blocked/failed fetch returns '' so the app degrades to empty
+// content (with the reason in _lastFetch / the Bug panel) instead of crashing on
+// an unhandled rejection. This matters on the TV where a direct cross-origin
+// fetch may be CORS/anti-bot blocked.
 async function httpGet(url) {
   const u = url + (url.indexOf('?') >= 0 ? '&' : '?') + '_=' + Date.now();
   try {
     const r = await fetch(u);
     _lastFetch = 'GET ' + url.replace(BASE, '') + ' -> ' + r.status;
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return await r.text();
+    return r.ok ? await r.text() : '';
   } catch (e) {
     _lastFetch = 'FAIL ' + url.replace(BASE, '') + ' -> ' + (e && e.message ? e.message : String(e));
-    throw e;
+    return '';
   }
 }
 
