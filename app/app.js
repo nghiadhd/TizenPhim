@@ -1907,6 +1907,11 @@ function startPlayback(url, resumeTime) {
   // remuxer tolerates it, so it's used everywhere — not just on Tizen.
   if (window.Hls && window.Hls.isSupported()) {
     _hls = new window.Hls({
+      // Cap the already-played (back) buffer. Its default is unbounded, so a
+      // 2h movie at 3.5Mbps accumulates a huge in-memory buffer that exhausts a
+      // low-RAM Tizen TV and causes constant rebuffering (short anime episodes
+      // never hit this — which is why TizenAnime seemed fine).
+      backBufferLength: 30,
       maxBufferLength: preset.maxBufferLength,
       maxMaxBufferLength: preset.maxMaxBufferLength,
       maxBufferSize: preset.maxBufferSize,
