@@ -136,7 +136,11 @@
 
 <div id="confirm-overlay" class="overlay hidden"></div>
 
+<!-- Samsung Product API (webapis.avplay). $WEBAPIS resolves inside the Tizen
+     runtime; if it 404s (e.g. plain browser), window.webapis stays undefined and
+     the player falls back to hls.js. Must load before app.js reads webapis. -->
+<script type="text/javascript" src="$WEBAPIS/webapis/webapis.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
-<script src="app.js?v=20260716d"></script>
+<script src="app.js?v=20260717"></script>
 </body>
 </html>
