@@ -393,6 +393,15 @@ body {
 body.avplay-active #screen-player { background: transparent; }
 body.avplay-active #video { display: none; }
 
+/* Debug badge: shows the live playback engine + any AVPlay fallback reason. */
+#player-debug {
+  position: absolute; top: 1rem; left: 1rem; z-index: 60;
+  background: rgba(0,0,0,0.78); color: #7CFC00;
+  font: 700 1.2rem/1.45 monospace; padding: 0.5rem 0.9rem; border-radius: 0.4rem;
+  max-width: 60%; white-space: pre-wrap; pointer-events: none;
+}
+#player-debug.hidden { display: none; }
+
 #player-overlay {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; justify-content: space-between;

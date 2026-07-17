@@ -1873,6 +1873,15 @@ function showAvSurface(on) {
   document.body.classList.toggle('avplay-active', !!on);
 }
 
+// On-screen debug badge so you can SEE which engine is really playing (and why
+// it fell back). Remove this block to disable the badge.
+function setPlayerDebug(msg) {
+  const el = document.getElementById('player-debug');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
 function mediaTimeSec() {
   if (_mediaBackend === 'avplay') { try { return (AVPLAY.getCurrentTime() || 0) / 1000; } catch (_) { return 0; } }
   const v = document.getElementById('video'); return v ? (v.currentTime || 0) : 0;
@@ -1934,6 +1943,7 @@ function startAvHealthWatch(url, resumeTime) {
 
 function avFail(url, resumeTime, why) {
   clearAvHealthWatch();
+  setPlayerDebug('⚠ AVPlay FAILED → HLS.js\n' + why);
   if (_avFellBack) { showPlayerError('Lỗi phát (AVPlay): ' + why); return; }
   _avFellBack = true;
   let at = resumeTime || 0;
@@ -1968,6 +1978,7 @@ function startPlaybackAV(url, resumeTime) {
       try { AVPLAY.play(); } catch (_) {}
       setPlayPauseIcon(true);
       showBuffering(false);
+      setPlayerDebug('✅ MODE: AVPlay (native hardware)');
       startAvHealthWatch(url, resumeTime);
     }, function (err) { avFail(url, resumeTime, 'prepare: ' + err); });
   } catch (e) {
@@ -1983,6 +1994,7 @@ function startPlayback(url, resumeTime) {
   _mediaBackend = null;
   _avFellBack = false;
   _avDuration = 0;
+  setPlayerDebug(AVPLAY ? '… AVPlay API present — trying native' : 'ℹ MODE: HLS.js (no AVPlay on this device)');
   if (AVPLAY) startPlaybackAV(url, resumeTime);
   else startPlaybackHtml5(url, resumeTime);
 }
