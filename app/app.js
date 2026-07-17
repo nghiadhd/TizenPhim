@@ -23,49 +23,54 @@ window.addEventListener('unhandledrejection', function(ev) {
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const VERSION = '1.0.0';
-const API     = 'https://phimapi.com';
-const CDN     = 'https://phimimg.com';
+// Source: phimmoie.fm (PhimMoiChill). Fetched DIRECTLY (no proxy) — phimmoie
+// blocks datacenter proxies, but the TV's home IP passes and TizenBrew may allow
+// the cross-origin fetch. Its streams are opstream90 (0 discontinuities → smooth,
+// unlike phimapi's kkphim). The 🐞 Bug panel shows whether the fetch worked.
+const BASE = 'https://phimmoie.fm';
 
-// ── Catalogs ──────────────────────────────────────────────────────────────────
+// ── Catalogs (phimmoie paths; pagination is /path/<n>) ────────────────────────
 const CATALOG_PATHS = {
-  'phim-moi':             '/danh-sach/phim-moi-cap-nhat',
-  'phim-le':              '/v1/api/danh-sach/phim-le',
-  'phim-bo':              '/v1/api/danh-sach/phim-bo',
-  'hoat-hinh':            '/v1/api/danh-sach/hoat-hinh',
-  'tv-shows':             '/v1/api/danh-sach/tv-shows',
-  'hanh-dong':            '/v1/api/the-loai/hanh-dong',
-  'tinh-cam':             '/v1/api/the-loai/tinh-cam',
-  'hai-huoc':             '/v1/api/the-loai/hai-huoc',
-  'kinh-di':              '/v1/api/the-loai/kinh-di',
-  'tam-ly':               '/v1/api/the-loai/tam-ly',
-  'hinh-su':              '/v1/api/the-loai/hinh-su',
-  'co-trang':             '/v1/api/the-loai/co-trang',
-  'than-thoai':           '/v1/api/the-loai/than-thoai',
-  'chien-tranh':          '/v1/api/the-loai/chien-tranh',
-  'hoc-duong':            '/v1/api/the-loai/hoc-duong',
-  'phieu-luu':            '/v1/api/the-loai/phieu-luu',
-  'bi-an':                '/v1/api/the-loai/bi-an',
-  'lich-su':              '/v1/api/the-loai/lich-su',
-  'vien-tuong':           '/v1/api/the-loai/vien-tuong',
-  'vo-thuat':             '/v1/api/the-loai/vo-thuat',
-  'gia-dinh':             '/v1/api/the-loai/gia-dinh',
-  'the-thao':             '/v1/api/the-loai/the-thao',
-  'am-nhac':              '/v1/api/the-loai/am-nhac',
-  'au-my':                '/v1/api/quoc-gia/au-my',
-  'han-quoc':             '/v1/api/quoc-gia/han-quoc',
-  'trung-quoc':           '/v1/api/quoc-gia/trung-quoc',
-  'nhat-ban':             '/v1/api/quoc-gia/nhat-ban',
-  'thai-lan':             '/v1/api/quoc-gia/thai-lan',
-  'viet-nam':             '/v1/api/quoc-gia/viet-nam',
+  'phim-le':     '/danh-sach/phim-le',
+  'phim-bo':     '/danh-sach/phim-bo',
+  'chieu-rap':   '/danh-sach/phim-chieu-rap',
+  'thuyet-minh': '/danh-sach/phim-thuyet-minh',
+  'hanh-dong':   '/the-loai/hanh-dong',
+  'tinh-cam':    '/the-loai/tinh-cam',
+  'hai-huoc':    '/the-loai/hai-huoc',
+  'kinh-di':     '/the-loai/kinh-di',
+  'tam-ly':      '/the-loai/tam-ly',
+  'hinh-su':     '/the-loai/hinh-su',
+  'co-trang':    '/the-loai/co-trang',
+  'than-thoai':  '/the-loai/than-thoai',
+  'chien-tranh': '/the-loai/chien-tranh',
+  'hoc-duong':   '/the-loai/hoc-duong',
+  'phieu-luu':   '/the-loai/phieu-luu',
+  'bi-an':       '/the-loai/bi-an',
+  'vien-tuong':  '/the-loai/vien-tuong',
+  'vo-thuat':    '/the-loai/vo-thuat',
+  'gia-dinh':    '/the-loai/gia-dinh',
+  'the-thao':    '/the-loai/the-thao',
+  'am-nhac':     '/the-loai/am-nhac',
+  'hoat-hinh':   '/the-loai/hoat-hinh',
+  'kinh-dien':   '/the-loai/kinh-dien',
+  'tv-shows':    '/the-loai/tv-shows',
+  'au-my':       '/quoc-gia/au-my',
+  'han-quoc':    '/quoc-gia/han-quoc',
+  'trung-quoc':  '/quoc-gia/trung-quoc',
+  'nhat-ban':    '/quoc-gia/nhat-ban',
+  'thai-lan':    '/quoc-gia/thai-lan',
+  'hong-kong':   '/quoc-gia/hong-kong',
 };
 
 const CATALOGS = [
   { id: 'search',     name: 'Tìm Kiếm',     local: true },
   { id: 'continue',   name: 'Đang Xem',     local: true },
   { id: 'favorite',   name: 'Yêu Thích',    local: true },
-  { id: 'phim-moi',   name: 'Phim Mới' },
   { id: 'phim-le',    name: 'Phim Lẻ' },
   { id: 'phim-bo',    name: 'Phim Bộ' },
+  { id: 'chieu-rap',  name: 'Chiếu Rạp' },
+  { id: 'thuyet-minh',name: 'Thuyết Minh' },
   { id: 'hoat-hinh',  name: 'Hoạt Hình' },
   { id: 'tv-shows',   name: 'TV Shows' },
   { id: 'hanh-dong',  name: 'Hành Động' },
@@ -80,18 +85,18 @@ const CATALOGS = [
   { id: 'hoc-duong',  name: 'Học Đường' },
   { id: 'phieu-luu',  name: 'Phiêu Lưu' },
   { id: 'bi-an',      name: 'Bí Ẩn' },
-  { id: 'lich-su',    name: 'Lịch Sử' },
   { id: 'vien-tuong', name: 'Viễn Tưởng' },
   { id: 'vo-thuat',   name: 'Võ Thuật' },
   { id: 'gia-dinh',   name: 'Gia Đình' },
   { id: 'the-thao',   name: 'Thể Thao' },
   { id: 'am-nhac',    name: 'Âm Nhạc' },
+  { id: 'kinh-dien',  name: 'Kinh Điển' },
   { id: 'au-my',      name: 'Âu Mỹ' },
   { id: 'han-quoc',   name: 'Hàn Quốc' },
   { id: 'trung-quoc', name: 'Trung Quốc' },
   { id: 'nhat-ban',   name: 'Nhật Bản' },
   { id: 'thai-lan',   name: 'Thái Lan' },
-  { id: 'viet-nam',   name: 'Việt Nam' },
+  { id: 'hong-kong',  name: 'Hồng Kông' },
 ];
 
 const LOCAL_BUILDERS = { continue: buildContinueWatching, favorite: buildFavorites };
@@ -204,36 +209,108 @@ function registerTizenKeys() {
 }
 
 // ── API fetch ─────────────────────────────────────────────────────────────────
+// Direct fetch (no proxy). A cache-buster keeps the Tizen webview from serving a
+// stale response. _lastFetch is surfaced in the 🐞 Bug panel so you can see on the
+// TV whether the fetch succeeded or was CORS/anti-bot blocked.
+let _lastFetch = '(chưa fetch)';
+async function httpGet(url) {
+  const u = url + (url.indexOf('?') >= 0 ? '&' : '?') + '_=' + Date.now();
+  try {
+    const r = await fetch(u);
+    _lastFetch = 'GET ' + url.replace(BASE, '') + ' -> ' + r.status;
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.text();
+  } catch (e) {
+    _lastFetch = 'FAIL ' + url.replace(BASE, '') + ' -> ' + (e && e.message ? e.message : String(e));
+    throw e;
+  }
+}
+
+function decodeEntities(s) {
+  return String(s == null ? '' : s)
+    .replace(/&amp;/g, '&').replace(/&#0?39;/g, "'").replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+}
+
+// phimmoie card: <a title="Name" ... href="/phim/slug"> … <img … src="/storage/…">
+function parseCards(html) {
+  const items = [], seen = {};
+  const re = /<a\s+title="([^"]*)"[^>]*href="\/phim\/([^"\/?#]+)"[^>]*>([\s\S]{0,400}?)<img[^>]*\ssrc="([^"]*)"/g;
+  let m;
+  while ((m = re.exec(html))) {
+    const slug = m[2];
+    const name = decodeEntities(m[1]);
+    if (!slug || !name || seen[slug]) continue;
+    seen[slug] = 1;
+    let poster = m[4];
+    if (poster && poster.indexOf('http') !== 0) poster = BASE + (poster.charAt(0) === '/' ? '' : '/') + poster;
+    items.push({ slug: slug, name: name, poster_url: poster, thumb_url: poster });
+  }
+  return items;
+}
+
 async function fetchCatalog(id, page) {
   if (page === undefined) page = 1;
   const path = CATALOG_PATHS[id];
   if (!path) return [];
-  const sep = path.indexOf('?') >= 0 ? '&' : '?';
-  const r = await fetch(API + path + sep + 'page=' + page);
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  const d = await r.json();
-  return (d.data && d.data.items) || d.items || [];
-}
-
-async function fetchDetail(slug) {
-  const r = await fetch(API + '/phim/' + slug);
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
+  return parseCards(await httpGet(BASE + path + (page > 1 ? '/' + page : '')));
 }
 
 async function fetchSearch(query) {
-  // The `_` cache-buster stops the Tizen webview from serving a stale cached
-  // response — without it, different queries could return the last result set.
-  const r = await fetch(API + '/v1/api/tim-kiem?keyword=' + encodeURIComponent(query) + '&limit=24' + '&_=' + Date.now());
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  const d = await r.json();
-  return (d.data && d.data.items) || [];
+  return parseCards(await httpGet(BASE + '/search?q=' + encodeURIComponent(query)));
+}
+
+function metaContent(html, prop) {
+  const m = html.match(new RegExp('property="' + prop + '"\\s+content="([^"]*)"')) ||
+            html.match(new RegExp('content="([^"]*)"\\s+property="' + prop + '"'));
+  return m ? decodeEntities(m[1]) : '';
+}
+
+function cleanTitle(t) {
+  return t.replace(/^(Phim|Xem phim)\s+/i, '')
+          .replace(/\s+Tập\s+\d+.*$/i, '')
+          .replace(/\s*-\s*PhimMoi.*$/i, '')
+          .replace(/\s+Vietsub\s*$/i, '').trim();
+}
+
+// Returns the phimapi-shaped { movie, episodes:[{server_name,server_data:[{name,slug,link_m3u8}]}] }
+// so the existing detail/player code is unchanged. link_m3u8 is resolved lazily
+// by fetchStream() on play (the m3u8 lives on each episode's watch page).
+async function fetchDetail(slug) {
+  const html = await httpGet(BASE + '/phim/' + slug);
+  const name = cleanTitle(metaContent(html, 'og:title')) || slug;
+  let poster = metaContent(html, 'og:image');
+  if (poster && poster.indexOf('http') !== 0) poster = BASE + poster;
+  const content = metaContent(html, 'og:description');
+  // phimmoie renders the per-episode list client-side, so it's not in the raw
+  // HTML. Approximate the count from the "episode_total" field (e.g. "8 Tập");
+  // fall back to a single episode. Any over-count just fails to resolve a stream.
+  let total = 1;
+  const mt = html.replace(/\\"/g, '"').match(/"episode_total":"(\d+)\s*T/i);
+  if (mt) total = Math.min(200, Math.max(1, Number(mt[1])));
+  const server_data = [];
+  for (let n = 1; n <= total; n++) server_data.push({ name: 'Tập ' + n, slug: 'tap-' + n, link_m3u8: '' });
+  return {
+    movie: { name: name, slug: slug, poster_url: poster, thumb_url: poster, content: content },
+    episodes: [{ server_name: 'PhimMoi', server_data: server_data }],
+  };
+}
+
+// The watch page embeds the episode's stream. Prefer opstream90 (clean); skip the
+// player.phimapi recommendation embeds (kkphim, discontinuity-heavy).
+async function fetchStream(slug, epSlug) {
+  const html = (await httpGet(BASE + '/phim/' + slug + '/' + epSlug)).replace(/\\\//g, '/');
+  const urls = html.match(/https?:\/\/[^"'\\ ]+\.m3u8[^"'\\ ]*/g) || [];
+  const cands = urls.filter(function (u) { return u.indexOf('player.phimapi') < 0; });
+  const url = cands.filter(function (u) { return /opstream/.test(u); })[0] || cands[0];
+  if (!url) throw new Error('Không tìm thấy stream');
+  return url;
 }
 
 function imgUrl(path) {
   if (!path) return '';
   if (path.indexOf('http') === 0) return path;
-  return CDN + '/' + path.replace(/^\//, '');
+  return BASE + '/' + path.replace(/^\//, '');
 }
 
 // ── Screen switcher ───────────────────────────────────────────────────────────
@@ -425,7 +502,7 @@ function onKey(e) {
 }
 
 // ── Home (hero) ──────────────────────────────────────────────────────────────
-const HERO_SOURCE_CAT = 'phim-moi';
+const HERO_SOURCE_CAT = 'phim-le';
 
 function showHome() {
   showScreen('home');
@@ -1662,12 +1739,10 @@ function setBufferLevel(level) {
   try { localStorage.setItem('tizenphim_bufferLevel', level); } catch (_) {}
 }
 
-function playEpisode(epIdx) {
+async function playEpisode(epIdx) {
   const eps = currentEps();
   if (!eps[epIdx]) return;
   const ep  = eps[epIdx];
-  const url = ep.link_m3u8;
-  if (!url) { return; }
 
   state.currentEpIdx = epIdx;
   state.focusEp      = epIdx;
@@ -1705,6 +1780,20 @@ function playEpisode(epIdx) {
   renderPlayerFocus();
   showOverlayPersistent();
 
+  // phimmoie: the m3u8 lives on the episode's watch page — resolve it lazily.
+  let url = ep.link_m3u8;
+  if (!url) {
+    showBuffering(true);
+    try {
+      url = await fetchStream(state.currentSlug, ep.slug);
+      ep.link_m3u8 = url;
+    } catch (e) {
+      showBuffering(false);
+      showPlayerError('Lỗi tải stream: ' + (e && e.message ? e.message : String(e)));
+      return;
+    }
+    if (state.screen !== 'player' || state.currentEpIdx !== epIdx) return; // navigated away
+  }
   startPlayback(url, resumeTime);
 }
 
@@ -1883,6 +1972,9 @@ function openDebugPanel() {
   let avState = '—'; if (AVPLAY) { try { avState = AVPLAY.getState(); } catch (e) { avState = 'err:' + e; } }
   const lines = [];
   lines.push('TizenPhim v' + VERSION);
+  lines.push('Source: phimmoie.fm (direct)');
+  lines.push('Last fetch: ' + _lastFetch);
+  lines.push('');
   lines.push('Engine now:  ' + (_mediaBackend === 'avplay' ? 'AVPlay (native)' : _mediaBackend === 'html5' ? 'HLS.js (JS)' : '—'));
   lines.push('AVPlay API:  ' + (AVPLAY ? 'present' : 'ABSENT') + '   state: ' + avState);
   lines.push('Fell back:   ' + (_avFellBack ? 'YES → HLS.js' : 'no'));
