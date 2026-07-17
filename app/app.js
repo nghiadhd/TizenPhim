@@ -1904,11 +1904,36 @@ function mediaSeekBy(sec) {
 }
 
 function avCleanup() {
+  clearAvHealthWatch();
   try { AVPLAY.stop(); } catch (_) {}
   try { AVPLAY.close(); } catch (_) {}
 }
 
+// Health watchdog: AVPlay can report success yet render nothing (black screen,
+// no error) if the display surface or codec path is wrong. If playback time
+// doesn't advance within ~10s (while not paused), treat it as a failure and
+// fall back to hls.js — so the worst on-TV case is "plays via hls.js", never a
+// dead screen.
+let _avHealthTimer = null;
+function clearAvHealthWatch() { if (_avHealthTimer) { clearInterval(_avHealthTimer); _avHealthTimer = null; } }
+function startAvHealthWatch(url, resumeTime) {
+  clearAvHealthWatch();
+  let startAt = 0; try { startAt = (AVPLAY.getCurrentTime() || 0) / 1000; } catch (_) {}
+  let ticks = 0;
+  _avHealthTimer = setInterval(function () {
+    let paused = false; try { paused = AVPLAY.getState() === 'PAUSED'; } catch (_) {}
+    if (paused) return;                       // user paused — not a stall
+    let t = 0; try { t = (AVPLAY.getCurrentTime() || 0) / 1000; } catch (_) {}
+    if (t > startAt + 0.5) { clearAvHealthWatch(); return; }   // progressing → healthy
+    if (++ticks >= 5) {                        // ~10s, no progress
+      clearAvHealthWatch();
+      avFail(url, resumeTime, 'no playback progress (black screen?)');
+    }
+  }, 2000);
+}
+
 function avFail(url, resumeTime, why) {
+  clearAvHealthWatch();
   if (_avFellBack) { showPlayerError('Lỗi phát (AVPlay): ' + why); return; }
   _avFellBack = true;
   let at = resumeTime || 0;
@@ -1943,6 +1968,7 @@ function startPlaybackAV(url, resumeTime) {
       try { AVPLAY.play(); } catch (_) {}
       setPlayPauseIcon(true);
       showBuffering(false);
+      startAvHealthWatch(url, resumeTime);
     }, function (err) { avFail(url, resumeTime, 'prepare: ' + err); });
   } catch (e) {
     avFail(url, resumeTime, 'open: ' + (e && e.message ? e.message : String(e)));
@@ -1951,6 +1977,7 @@ function startPlaybackAV(url, resumeTime) {
 
 function startPlayback(url, resumeTime) {
   clearTimeout(_stallTimer);
+  clearAvHealthWatch();
   state.currentStreamUrl = url;
   hidePlayerError();
   _mediaBackend = null;
@@ -2051,6 +2078,7 @@ function applyBufferLevelLive(level) {
 
 function stopPlayback() {
   clearTimeout(_stallTimer);
+  clearAvHealthWatch();
   const dur = mediaDurationSec();
   if (dur && state.currentSlug) {
     saveHistory(state.currentSlug, { epIdx: state.currentEpIdx, time: mediaTimeSec(), duration: dur });
