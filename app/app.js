@@ -222,7 +222,9 @@ async function fetchDetail(slug) {
 }
 
 async function fetchSearch(query) {
-  const r = await fetch(API + '/v1/api/tim-kiem?keyword=' + encodeURIComponent(query) + '&limit=24');
+  // The `_` cache-buster stops the Tizen webview from serving a stale cached
+  // response — without it, different queries could return the last result set.
+  const r = await fetch(API + '/v1/api/tim-kiem?keyword=' + encodeURIComponent(query) + '&limit=24' + '&_=' + Date.now());
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const d = await r.json();
   return (d.data && d.data.items) || [];
@@ -1094,6 +1096,7 @@ function observeHomeRows() {
 let _sidebarDebounce = null;
 let _lastProgressSave = 0;
 let _hls = null;
+let _stallTimer = null;
 
 function showBrowse() {
   showScreen('browse');
@@ -1871,9 +1874,20 @@ function startPlayback(url, resumeTime) {
       try { video.currentTime = resumeTime; } catch (_) {}
     }
   };
-  video.onwaiting = function() { showBuffering(true); };
-  video.onplaying = function() { showBuffering(false); hidePlayerError(); };
-  video.oncanplay = function() { showBuffering(false); };
+  // Stall watchdog: a long seek into an unbuffered region can leave hls.js
+  // buffering forever. If we're still waiting after 10s (and not paused), force
+  // a reload from the current position. onseeked clears a stuck overlay too.
+  clearTimeout(_stallTimer);
+  video.onwaiting = function() {
+    showBuffering(true);
+    clearTimeout(_stallTimer);
+    _stallTimer = setTimeout(function() {
+      if (_hls && !video.paused) { try { _hls.startLoad(); } catch (_) {} }
+    }, 10000);
+  };
+  video.onplaying = function() { showBuffering(false); hidePlayerError(); clearTimeout(_stallTimer); };
+  video.oncanplay = function() { showBuffering(false); clearTimeout(_stallTimer); };
+  video.onseeked  = function() { showBuffering(false); };
   video.onerror   = function() {
     const code = video.error && video.error.code;
     showPlayerError('Không phát được video (' + (MEDIA_ERROR_LABELS[code] || 'lỗi không rõ #' + code) + ')');
@@ -1928,6 +1942,7 @@ function applyBufferLevelLive(level) {
 }
 
 function stopPlayback() {
+  clearTimeout(_stallTimer);
   const video = document.getElementById('video');
   if (video) {
     if (video.duration && state.currentSlug) {
@@ -1935,7 +1950,7 @@ function stopPlayback() {
       syncLocalRow('continue');
     }
     video.src = ''; video.ontimeupdate = null; video.onended = null; video.onloadedmetadata = null;
-    video.onwaiting = null; video.onplaying = null; video.oncanplay = null;
+    video.onwaiting = null; video.onplaying = null; video.oncanplay = null; video.onseeked = null;
   }
   if (_hls) { _hls.destroy(); _hls = null; }
   showBuffering(false);
