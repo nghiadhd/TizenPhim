@@ -402,6 +402,12 @@ body.avplay-active #video { display: none; }
 }
 #player-debug.hidden { display: none; }
 
+/* Full diagnostics panel (🐞 button). */
+.debug-box { background: rgba(0,0,0,0.94); border: 1px solid #555; border-radius: 0.6rem; padding: 1.6rem 2rem; max-width: 82%; }
+.debug-title { color: #7CFC00; font-weight: 700; font-size: 1.6rem; margin-bottom: 1rem; }
+.debug-pre { color: #f0f0f0; font: 1.15rem/1.55 monospace; white-space: pre-wrap; word-break: break-all; margin: 0; }
+.debug-hint { color: #aaa; font-size: 1.15rem; margin-top: 1.2rem; }
+
 #player-overlay {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; justify-content: space-between;

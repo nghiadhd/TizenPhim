@@ -407,6 +407,7 @@ function removeFromLocalList(catId, slug) {
 function onKey(e) {
   const k = e.keyCode;
   if (state.confirmDialog) { if (handleConfirmDialog(k)) e.preventDefault(); return; }
+  if (state.debugOpen) { closeDebugPanel(); e.preventDefault(); return; }
   if (state.playerSettingsOpen) { if (handlePlayerSettings(k)) e.preventDefault(); return; }
   if (k === KEY.ENTER) {
     const target = getFocusedRemovableItem();
@@ -1735,7 +1736,7 @@ function togglePlayPause() {
 }
 
 function getPlayerControlIds() {
-  const ids = ['player-rew', 'player-playpause', 'player-ff', 'player-settings'];
+  const ids = ['player-rew', 'player-playpause', 'player-ff', 'player-settings', 'player-bug'];
   const nextBtn = document.getElementById('player-next-ep');
   if (nextBtn && !nextBtn.classList.contains('hidden')) ids.push('player-next-ep');
   return ids;
@@ -1759,6 +1760,8 @@ function activateFocusedPlayerControl(video) {
     mediaSeekBy(10);
   } else if (id === 'player-settings') {
     openPlayerSettings();
+  } else if (id === 'player-bug') {
+    openDebugPanel();
   } else if (id === 'player-next-ep') {
     playNext();
   }
@@ -1768,7 +1771,7 @@ function renderPlayerFocus() {
   const seekBarEl = document.querySelector('.seek-bar');
   if (seekBarEl) seekBarEl.classList.toggle('focused', state.playerZone === 'seek');
 
-  ['player-rew', 'player-playpause', 'player-ff', 'player-settings', 'player-next-ep'].forEach(function(id) {
+  ['player-rew', 'player-playpause', 'player-ff', 'player-settings', 'player-bug', 'player-next-ep'].forEach(function(id) {
     const el = document.getElementById(id);
     if (el) el.classList.remove('focused');
   });
@@ -1882,6 +1885,51 @@ function setPlayerDebug(msg) {
   el.classList.remove('hidden');
 }
 
+// Full diagnostics panel — press the 🐞 button, screenshot it, send to dev.
+function openDebugPanel() {
+  const url = state.currentStreamUrl || '';
+  let cdn = '—'; try { if (url) cdn = new URL(url).hostname; } catch (_) {}
+  let avState = '—'; if (AVPLAY) { try { avState = AVPLAY.getState(); } catch (e) { avState = 'err:' + e; } }
+  const lines = [];
+  lines.push('TizenPhim v' + VERSION);
+  lines.push('Engine now:  ' + (_mediaBackend === 'avplay' ? 'AVPlay (native)' : _mediaBackend === 'html5' ? 'HLS.js (JS)' : '—'));
+  lines.push('AVPlay API:  ' + (AVPLAY ? 'present' : 'ABSENT') + '   state: ' + avState);
+  lines.push('Fell back:   ' + (_avFellBack ? 'YES → HLS.js' : 'no'));
+  if (_lastAvReason) lines.push('AV reason:   ' + _lastAvReason);
+  lines.push('');
+  lines.push('Stream: ' + (url ? url.slice(0, 90) : '—'));
+  lines.push('CDN:    ' + cdn);
+  lines.push('Time:   ' + mediaTimeSec().toFixed(1) + ' / ' + mediaDurationSec().toFixed(0) + ' s');
+  lines.push('Buffer preset: ' + getBufferLevel());
+  if (_mediaBackend === 'html5') {
+    const v = document.getElementById('video');
+    let fwd = 0; try { fwd = v.buffered.length ? (v.buffered.end(v.buffered.length - 1) - v.currentTime) : 0; } catch (_) {}
+    lines.push('HLS level:   ' + (_hls ? _hls.currentLevel : '—') + ' / ' + (_hls && _hls.levels ? _hls.levels.length : '—'));
+    lines.push('Video state: readyState ' + (v ? v.readyState : '—') + ', err ' + (v && v.error ? v.error.code : 'none'));
+    lines.push('Fwd buffer:  ' + fwd.toFixed(1) + 's');
+  }
+  lines.push('');
+  lines.push('Screen: ' + window.innerWidth + 'x' + window.innerHeight);
+  lines.push('UA: ' + (navigator.userAgent || '').slice(0, 130));
+
+  const overlay = document.getElementById('debug-overlay');
+  if (!overlay) return;
+  overlay.innerHTML =
+    '<div class="debug-box">' +
+      '<div class="debug-title">🐞 Debug — chụp màn hình gửi dev</div>' +
+      '<pre class="debug-pre">' + escHtml(lines.join('\n')) + '</pre>' +
+      '<div class="debug-hint">Nhấn phím bất kỳ để đóng</div>' +
+    '</div>';
+  overlay.classList.remove('hidden');
+  state.debugOpen = true;
+}
+
+function closeDebugPanel() {
+  state.debugOpen = false;
+  const overlay = document.getElementById('debug-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
 function mediaTimeSec() {
   if (_mediaBackend === 'avplay') { try { return (AVPLAY.getCurrentTime() || 0) / 1000; } catch (_) { return 0; } }
   const v = document.getElementById('video'); return v ? (v.currentTime || 0) : 0;
@@ -1941,8 +1989,10 @@ function startAvHealthWatch(url, resumeTime) {
   }, 2000);
 }
 
+let _lastAvReason = '';
 function avFail(url, resumeTime, why) {
   clearAvHealthWatch();
+  _lastAvReason = why;
   setPlayerDebug('⚠ AVPlay FAILED → HLS.js\n' + why);
   if (_avFellBack) { showPlayerError('Lỗi phát (AVPlay): ' + why); return; }
   _avFellBack = true;
